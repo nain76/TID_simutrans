@@ -1,0 +1,24 @@
+{
+  "comment": "Simutrans TiD Configuration File",
+
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "comment": "0.0.0.0 allows external access. Use 127.0.0.1 for localhost only"
+  },
+
+  "scanner": {
+    "process_name": "simutrans.exe",
+    "update_interval_seconds": 4,
+    "comment": "How often to scan memory (3-5 seconds recommended)"
+  },
+
+  "display": {
+    "station_spacing": 150,
+    "track_height": 80,
+    "canvas_height": 600,
+    "comment": "Display layout parameters (pixels)"
+  },
+
+  "offsets_file": "config/offsets.json"
+}

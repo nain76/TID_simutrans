@@ -1,0 +1,34 @@
+{
+  "comment": "Memory offsets for Simutrans OTRP - MUST be configured for your version",
+  "version": "UNKNOWN",
+  "architecture": "x64",
+  "instructions": "Use offset_discovery.py to find these values for your Simutrans version",
+
+  "offsets": {
+    "karte_t": {
+      "convoi_array": "0x0000",
+      "halt_array": "0x0000",
+      "comment": "Offset of convoi_array and halt_array in karte_t (world) object"
+    },
+    "convoi_t": {
+      "id": "0x0000",
+      "name": "0x0000",
+      "position": "0x0000",
+      "speed": "0x0000",
+      "state": "0x0000",
+      "schedule": "0x0000",
+      "vehicles": "0x0000",
+      "comment": "Offsets within convoi_t object"
+    },
+    "vehicle_t": {
+      "cargo_max": "0x0000",
+      "cargo_loaded": "0x0000",
+      "comment": "Offsets within vehicle_t object"
+    },
+    "haltestelle_t": {
+      "name": "0x0000",
+      "position": "0x0000",
+      "comment": "Offsets within haltestelle_t (station) object"
+    }
+  }
+}

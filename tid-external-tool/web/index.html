@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simutrans 列車在線表示システム (TiD)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="tid-header">
+        <h1>Simutrans 列車在線表示システム (TiD)</h1>
+        <div id="info">
+            <span id="clock">--:--:--</span>
+            <span id="train-count">列車数: --</span>
+            <span id="update-status" class="disconnected">⚫ 未接続</span>
+        </div>
+    </div>
+
+    <div id="tid-canvas-container">
+        <canvas id="tid-canvas"></canvas>
+    </div>
+
+    <div id="loading-overlay">
+        <div id="loading-message">
+            <h2>TiDシステム起動中...</h2>
+            <p>サーバーに接続しています</p>
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <script src="tid.js"></script>
+</body>
+</html>

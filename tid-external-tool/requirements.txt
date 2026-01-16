@@ -1,0 +1,12 @@
+# Simutrans Train Information Display (TiD) - External Tool
+# Python dependencies
+
+# Memory reading (Windows only)
+pymem==1.13.1; sys_platform == 'win32'
+
+# Web server
+flask==3.0.0
+flask-cors==4.0.0
+
+# Utilities
+psutil==5.9.6
