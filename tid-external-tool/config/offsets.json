@@ -1,0 +1,137 @@
+{
+  "comment": "Memory offsets for Simutrans OTRP v50.1 - MUST be configured manually",
+  "version": "50.1",
+  "architecture": "x64",
+  "configuration_status": "INCOMPLETE - Requires manual configuration",
+
+  "IMPORTANT_NOTE": [
+    "These offset values CANNOT be determined from source code alone.",
+    "They depend on compiler settings, optimization level, and binary structure.",
+    "You MUST find these values using ONE of these methods:",
+    "  1. Use a debugger (gdb on Linux, x64dbg on Windows) - see docs/offset_configuration.md",
+    "  2. Get values from Simutrans OTRP community for v50.1",
+    "  3. Wait for automatic offset detection feature (coming soon)",
+    "",
+    "Current status: ALL VALUES BELOW ARE PLACEHOLDERS (0x0000)",
+    "The tool WILL NOT WORK until you configure actual offsets!"
+  ],
+
+  "offsets": {
+    "karte_t": {
+      "comment": "World object - contains all game data",
+      "convoi_array": "0x0000",
+      "convoi_array_description": "Offset to vector_tpl<convoihandle_t> convoi_array in karte_t class",
+      "convoi_array_source": "simworld.h:272",
+
+      "halt_array": "0x0000",
+      "halt_array_description": "Offset to halt array in karte_t class (optional for basic functionality)",
+
+      "finding_instructions": [
+        "In gdb: break karte_t::step, then print &((karte_t*)this)->convoi_array",
+        "Calculate offset: address of convoi_array - address of karte_t object"
+      ]
+    },
+
+    "convoi_t": {
+      "comment": "Convoy object - represents a train/vehicle convoy",
+      "source_file": "simconvoi.h",
+
+      "wait_lock": "0x0000",
+      "wait_lock_description": "sint32 wait_lock (line 109)",
+      "wait_lock_note": "First member after virtual tables (24 bytes header on x64)",
+
+      "state": "0x0000",
+      "state_description": "states state (enum, 4 bytes) (line 111)",
+
+      "akt_speed": "0x0000",
+      "akt_speed_description": "sint32 akt_speed - current speed (line 147)",
+
+      "fahr": "0x0000",
+      "fahr_description": "array_tpl<vehicle_t*> fahr - vehicle array (line 180)",
+
+      "schedule": "0x0000",
+      "schedule_description": "schedule_t *schedule - pointer to schedule (line 203)",
+
+      "name_and_id": "0x0000",
+      "name_and_id_description": "char name_and_id[128] - convoy name (line 387)",
+
+      "finding_instructions": [
+        "In gdb: break convoi_t::step",
+        "print &((convoi_t*)this)->wait_lock  (should be ~+24 bytes from start on x64)",
+        "print &((convoi_t*)this)->state",
+        "print &((convoi_t*)this)->akt_speed",
+        "print &((convoi_t*)this)->name_and_id",
+        "Calculate offsets from convoi_t object start address"
+      ]
+    },
+
+    "vehicle_t": {
+      "comment": "Vehicle object - individual vehicle in a convoy",
+      "cargo_max": "0x0000",
+      "cargo_loaded": "0x0000",
+
+      "note": "Vehicle offsets are optional for basic train display functionality"
+    },
+
+    "haltestelle_t": {
+      "comment": "Station/halt object",
+      "name": "0x0000",
+      "position": "0x0000",
+
+      "note": "Station offsets are optional for basic train display functionality"
+    }
+  },
+
+  "how_to_configure": {
+    "method_1_debugger": {
+      "description": "Use GDB (Linux) or x64dbg (Windows) to inspect memory",
+      "steps": [
+        "1. Start Simutrans OTRP v50.1",
+        "2. Attach debugger to simutrans process",
+        "3. Set breakpoint in karte_t::step or convoi_t::step",
+        "4. When breakpoint hits, print addresses of members",
+        "5. Calculate offset = member_address - object_start_address",
+        "6. Update this file with hexadecimal offsets"
+      ],
+      "documentation": "See docs/offset_configuration.md for detailed instructions"
+    },
+
+    "method_2_community": {
+      "description": "Get pre-configured offsets from community",
+      "steps": [
+        "1. Check Simutrans OTRP forum or GitHub discussions",
+        "2. Search for 'v50.1 memory offsets' or 'v50.1 TiD configuration'",
+        "3. Download offsets.json for v50.1",
+        "4. Replace this file with community-provided configuration"
+      ]
+    },
+
+    "method_3_auto_discovery": {
+      "description": "Automatic offset detection (future feature)",
+      "status": "Not yet implemented",
+      "note": "Run: python offset_discovery.py --auto (coming in future version)"
+    }
+  },
+
+  "example_values_from_older_versions": {
+    "note": "These are EXAMPLE values only - DO NOT USE directly!",
+    "example_x64_offsets": {
+      "karte_t_convoi_array": "Typically 0x1000-0x2000 range",
+      "convoi_t_wait_lock": "Usually ~0x18 (24 bytes after start due to vtable)",
+      "convoi_t_state": "Usually ~0x1C (4 bytes after wait_lock)",
+      "convoi_t_akt_speed": "Varies significantly depending on compiler"
+    },
+    "warning": "Offsets change between versions! These examples are for reference only!"
+  },
+
+  "validation": {
+    "how_to_test": [
+      "1. Configure offsets in this file",
+      "2. Run: python tid_main.py",
+      "3. Check console for errors",
+      "4. Open browser to http://localhost:8080",
+      "5. If you see trains with correct names, offsets are correct!",
+      "6. If you see crashes or garbage data, offsets are wrong"
+    ]
+  }
+}
