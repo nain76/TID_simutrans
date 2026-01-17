@@ -1,0 +1,31 @@
+[Unit]
+Description=Train Position Tracker Web Server
+Documentation=https://github.com/your-repo/train-tracker
+After=network.target
+
+[Service]
+Type=simple
+User=simutrans
+Group=simutrans
+WorkingDirectory=/opt/train_tracker_server
+Environment="PATH=/usr/bin:/usr/local/bin"
+EnvironmentFile=/opt/train_tracker_server/.env
+ExecStart=/usr/bin/python3 /opt/train_tracker_server/server.py
+Restart=always
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/train_tracker_server
+ReadOnlyPaths=/path/to/simutrans/train_positions.json
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=train-tracker
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,426 @@
+/**
+ * Train Position Tracker - Styles
+ * Wide-screen optimized layout
+ */
+
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* Color scheme */
+    --primary-color: #2c3e50;
+    --secondary-color: #34495e;
+    --accent-color: #3498db;
+    --success-color: #27ae60;
+    --warning-color: #f39c12;
+    --danger-color: #e74c3c;
+    --bg-color: #ecf0f1;
+    --card-bg: #ffffff;
+    --text-color: #2c3e50;
+    --text-muted: #7f8c8d;
+    --border-color: #bdc3c7;
+
+    /* Spacing */
+    --spacing-xs: 0.25rem;
+    --spacing-sm: 0.5rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.5rem;
+    --spacing-xl: 2rem;
+
+    /* Layout */
+    --sidebar-width: 280px;
+    --header-height: 80px;
+}
+
+body {
+    font-family: 'Segoe UI', 'Yu Gothic', 'Meiryo', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-color);
+    color: var(--text-color);
+    line-height: 1.6;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    color: white;
+    padding: var(--spacing-lg);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    min-height: var(--header-height);
+}
+
+.header-content {
+    max-width: 1800px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+}
+
+header h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+}
+
+.header-info {
+    display: flex;
+    gap: var(--spacing-lg);
+    flex-wrap: wrap;
+}
+
+.info-item {
+    font-size: 0.9rem;
+    opacity: 0.95;
+}
+
+.status-indicator {
+    padding: var(--spacing-xs) var(--spacing-md);
+    border-radius: 12px;
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.status-ok {
+    background: rgba(39, 174, 96, 0.2);
+    color: #27ae60;
+}
+
+.status-error {
+    background: rgba(231, 76, 60, 0.2);
+    color: #e74c3c;
+}
+
+/* Main layout - horizontal split */
+.main-container {
+    flex: 1;
+    display: flex;
+    max-width: 1800px;
+    margin: var(--spacing-lg) auto;
+    width: 100%;
+    gap: var(--spacing-lg);
+    padding: 0 var(--spacing-lg);
+}
+
+/* Sidebar */
+.sidebar {
+    width: var(--sidebar-width);
+    flex-shrink: 0;
+}
+
+.filter-section {
+    background: var(--card-bg);
+    border-radius: 8px;
+    padding: var(--spacing-lg);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    position: sticky;
+    top: var(--spacing-lg);
+}
+
+.filter-section h3 {
+    margin-bottom: var(--spacing-lg);
+    color: var(--primary-color);
+    font-size: 1.1rem;
+}
+
+.filter-group {
+    margin-bottom: var(--spacing-lg);
+}
+
+.filter-group label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-color);
+    font-size: 0.9rem;
+}
+
+.filter-group input[type="text"],
+.filter-group select {
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    transition: border-color 0.2s;
+}
+
+.filter-group input[type="text"]:focus,
+.filter-group select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+.filter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-sm);
+}
+
+.filter-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+}
+
+.checkbox-list {
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: var(--spacing-sm);
+    background: #fafafa;
+}
+
+.checkbox-list label {
+    display: block;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: 0;
+    cursor: pointer;
+    transition: background 0.2s;
+    border-radius: 3px;
+    font-weight: normal;
+}
+
+.checkbox-list label:hover {
+    background: rgba(52, 152, 219, 0.1);
+}
+
+.checkbox-list input[type="checkbox"] {
+    margin-right: var(--spacing-sm);
+}
+
+/* Buttons */
+.btn-primary,
+.btn-small {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: var(--accent-color);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background 0.2s, transform 0.1s;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+}
+
+.btn-primary:hover,
+.btn-small:hover {
+    background: #2980b9;
+    transform: translateY(-1px);
+}
+
+.btn-primary:active,
+.btn-small:active {
+    transform: translateY(0);
+}
+
+.btn-small {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    width: auto;
+}
+
+.btn-icon {
+    font-size: 1.1rem;
+}
+
+/* Stats */
+.stats {
+    margin-top: var(--spacing-lg);
+    padding-top: var(--spacing-lg);
+    border-top: 1px solid var(--border-color);
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--spacing-sm) 0;
+    font-size: 0.9rem;
+}
+
+.stat-label {
+    color: var(--text-muted);
+}
+
+.stat-value {
+    font-weight: 600;
+    color: var(--accent-color);
+}
+
+/* Main content */
+.content {
+    flex: 1;
+    min-width: 0; /* Important for flex child */
+}
+
+.table-container {
+    background: var(--card-bg);
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    overflow: hidden;
+}
+
+/* Table */
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+thead {
+    background: var(--secondary-color);
+    color: white;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+th {
+    padding: var(--spacing-md);
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+tbody tr {
+    border-bottom: 1px solid #ecf0f1;
+    transition: background 0.2s;
+}
+
+tbody tr:hover {
+    background: #f8f9fa;
+}
+
+tbody tr.loading {
+    background: #fff3cd;
+}
+
+td {
+    padding: var(--spacing-md);
+    font-size: 0.9rem;
+}
+
+/* Messages */
+.no-data,
+.error-message {
+    text-align: center;
+    padding: var(--spacing-xl);
+    background: var(--card-bg);
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.no-data-icon,
+.error-icon {
+    font-size: 4rem;
+    margin-bottom: var(--spacing-md);
+}
+
+.no-data h2,
+.error-message h3 {
+    color: var(--primary-color);
+    margin-bottom: var(--spacing-md);
+}
+
+.no-data ul {
+    text-align: left;
+    max-width: 600px;
+    margin: var(--spacing-lg) auto 0;
+    list-style-position: inside;
+}
+
+.no-data li {
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-muted);
+}
+
+code {
+    background: #f4f4f4;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.875em;
+}
+
+.error-message {
+    background: #fee;
+    border: 1px solid var(--danger-color);
+}
+
+/* Footer */
+footer {
+    background: var(--primary-color);
+    color: white;
+    text-align: center;
+    padding: var(--spacing-lg);
+    margin-top: var(--spacing-xl);
+    font-size: 0.875rem;
+}
+
+/* Responsive design */
+@media (max-width: 1024px) {
+    .main-container {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        width: 100%;
+        position: static;
+    }
+
+    .filter-section {
+        position: static;
+    }
+}
+
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 1.3rem;
+    }
+
+    .header-info {
+        font-size: 0.8rem;
+        gap: var(--spacing-sm);
+    }
+
+    th, td {
+        padding: var(--spacing-sm);
+        font-size: 0.8rem;
+    }
+
+    .main-container {
+        padding: 0 var(--spacing-sm);
+        gap: var(--spacing-sm);
+    }
+}
+
+/* Scrollbar styling */
+.checkbox-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.checkbox-list::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.checkbox-list::-webkit-scrollbar-thumb {
+    background: #bdc3c7;
+    border-radius: 4px;
+}
+
+.checkbox-list::-webkit-scrollbar-thumb:hover {
+    background: #95a5a6;
+}

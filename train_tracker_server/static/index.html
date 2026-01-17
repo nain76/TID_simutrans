@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>列車位置追跡システム - Train Position Tracker</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>🚆 列車位置追跡システム</h1>
+            <div class="header-info">
+                <span id="game-time" class="info-item">ゲーム時刻: --</span>
+                <span id="update-time" class="info-item">最終更新: --</span>
+                <span id="connection-status" class="status-indicator status-ok">●接続中</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Sidebar with filters -->
+        <aside class="sidebar">
+            <div class="filter-section">
+                <h3>検索・フィルタ</h3>
+
+                <!-- Search box -->
+                <div class="filter-group">
+                    <label for="search">検索</label>
+                    <input
+                        type="text"
+                        id="search"
+                        placeholder="列車名、路線名、駅名..."
+                        autocomplete="off"
+                    >
+                </div>
+
+                <!-- Line filter -->
+                <div class="filter-group">
+                    <div class="filter-header">
+                        <label>路線フィルタ</label>
+                        <div class="filter-actions">
+                            <button class="btn-small" onclick="selectAllLines()">全選択</button>
+                            <button class="btn-small" onclick="deselectAllLines()">全解除</button>
+                        </div>
+                    </div>
+                    <div id="line-filters" class="checkbox-list">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+
+                <!-- Waytype filter -->
+                <div class="filter-group">
+                    <label for="filter-waytype">線路種別</label>
+                    <select id="filter-waytype">
+                        <option value="">全ての種別</option>
+                        <option value="rail">普通鉄道</option>
+                        <option value="monorail">モノレール</option>
+                        <option value="maglev">リニア</option>
+                        <option value="narrowgauge">ナローゲージ</option>
+                        <option value="tram">路面電車</option>
+                    </select>
+                </div>
+
+                <!-- Manual refresh button -->
+                <button id="refresh-btn" class="btn-primary">
+                    <span class="btn-icon">🔄</span>
+                    手動更新
+                </button>
+
+                <!-- Stats -->
+                <div class="stats">
+                    <div class="stat-item">
+                        <span class="stat-label">表示中:</span>
+                        <span id="visible-count" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">総数:</span>
+                        <span id="total-count" class="stat-value">0</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main content area -->
+        <main class="content">
+            <!-- Train table -->
+            <div class="table-container">
+                <table id="train-table">
+                    <thead>
+                        <tr>
+                            <th>列車名</th>
+                            <th>路線名</th>
+                            <th>現在位置 (X, Y, Z)</th>
+                            <th>線路種別</th>
+                            <th>速度 (km/h)</th>
+                            <th>現在駅</th>
+                            <th>次駅</th>
+                            <th>状態</th>
+                        </tr>
+                    </thead>
+                    <tbody id="train-list">
+                        <!-- Dynamically populated -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- No data message -->
+            <div id="no-data" class="no-data" style="display: none;">
+                <div class="no-data-icon">📭</div>
+                <h2>データがありません</h2>
+                <p>Simutransが実行中で、シナリオスクリプトが読み込まれているか確認してください。</p>
+                <ul>
+                    <li>Simutransでシナリオ「列車位置追跡システム」を読み込んでいますか？</li>
+                    <li><code>train_positions.json</code> ファイルが生成されていますか？</li>
+                    <li>サーバーの環境変数 <code>JSON_PATH</code> は正しく設定されていますか？</li>
+                </ul>
+            </div>
+
+            <!-- Error message -->
+            <div id="error-message" class="error-message" style="display: none;">
+                <div class="error-icon">⚠️</div>
+                <h3 id="error-title">エラーが発生しました</h3>
+                <p id="error-text"></p>
+            </div>
+        </main>
+    </div>
+
+    <footer>
+        <p>Simutrans OTRP 列車位置追跡システム | Powered by Flask + Squirrel</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
