@@ -50,9 +50,10 @@ function start(pl_nr) {
     print("[Train Tracker AI] Started for player: " + player.get_name())
     print("[Train Tracker AI] Export interval: ~" + (config.export_interval_ticks / 20) + " seconds")
     print("[Train Tracker AI] Output file: " + config.output_file)
+    print("[Train Tracker AI] First export will occur in ~30 seconds")
 
-    // Do initial export
-    export_train_data()
+    // Don't do initial export to avoid timeout
+    // Export will happen automatically via new_month() or step()
 }
 
 /**
@@ -67,8 +68,8 @@ function resume_game(pl_nr) {
     print("[Train Tracker AI] Resuming from saved game")
     print("[Train Tracker AI] Previous exports: " + persistent.export_count)
 
-    // Do initial export after resume
-    export_train_data()
+    // Don't do initial export to avoid timeout
+    // Export will happen automatically via new_month() or step()
 }
 
 /**
