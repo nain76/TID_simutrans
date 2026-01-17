@@ -1,8 +1,14 @@
 /**
- * Train Position Tracker Scenario for Simutrans OTRP
+ * Train Position Tracker AI for Simutrans OTRP
  *
- * This scenario tracks train positions and exports them to JSON
+ * This AI script tracks train positions and exports them to JSON
  * for web-based visualization.
+ *
+ * Usage:
+ * 1. Start or load a game
+ * 2. Add a new AI player
+ * 3. Select "train_tracker" as the AI script
+ * 4. The AI will automatically export train data every ~30 seconds
  *
  * Author: Claude Code
  * Version: 1.0
@@ -11,15 +17,6 @@
 // Include utility scripts
 include("waytype_translator")
 include("json_writer")
-
-// Map file - empty string means use current map
-map.file = ""
-
-// Scenario metadata
-scenario.short_description = "列車位置追跡システム"
-scenario.author = "Claude Code"
-scenario.version = "1.0"
-scenario.api = "112.3"
 
 // Configuration
 config <- {
@@ -36,16 +33,21 @@ config <- {
 // Persistent data (survives save/load)
 persistent <- {
     last_export_ticks = 0,
-    export_count = 0
+    export_count = 0,
+    ai_player = null  // Store AI player reference
 }
 
 /**
- * Scenario initialization
+ * AI initialization
+ * Called when AI is first started
+ * @param pl Player object for this AI
  */
-function start() {
-    print("[Train Tracker] Scenario started")
-    print("[Train Tracker] Export interval: ~" + (config.export_interval_ticks / 20) + " seconds")
-    print("[Train Tracker] Output file: " + config.output_file)
+function start(pl) {
+    persistent.ai_player = pl
+
+    print("[Train Tracker AI] Started for player: " + pl.get_name())
+    print("[Train Tracker AI] Export interval: ~" + (config.export_interval_ticks / 20) + " seconds")
+    print("[Train Tracker AI] Output file: " + config.output_file)
 
     // Do initial export
     export_train_data()
@@ -53,18 +55,31 @@ function start() {
 
 /**
  * Resume from saved game
+ * @param pl Player object for this AI
  */
-function resume_game() {
-    print("[Train Tracker] Resuming from saved game")
-    print("[Train Tracker] Previous exports: " + persistent.export_count)
-    start()
+function resume_game(pl) {
+    persistent.ai_player = pl
+
+    print("[Train Tracker AI] Resuming from saved game")
+    print("[Train Tracker AI] Previous exports: " + persistent.export_count)
+
+    // Do initial export after resume
+    export_train_data()
 }
 
 /**
  * Called every game month
- * We check the tick counter here to trigger exports
+ * We use this to trigger exports at regular intervals
  */
 function new_month() {
+    check_and_export()
+}
+
+/**
+ * Called every game tick (optional)
+ * We check the tick counter here for more precise timing
+ */
+function step() {
     check_and_export()
 }
 
@@ -93,7 +108,7 @@ function export_train_data() {
         local convoy_list = world.get_convoy_list()
 
         if (config.debug) {
-            print("[Train Tracker] Collecting data from " + convoy_list.get_count() + " convoys")
+            print("[Train Tracker AI] Collecting data from " + convoy_list.get_count() + " convoys")
         }
 
         // Iterate through all convoys
@@ -156,11 +171,11 @@ function export_train_data() {
         persistent.export_count++
 
         if (config.debug) {
-            print("[Train Tracker] Exported " + trains.len() + " trains (total exports: " + persistent.export_count + ")")
+            print("[Train Tracker AI] Exported " + trains.len() + " trains (total exports: " + persistent.export_count + ")")
         }
 
     } catch (e) {
-        print("[Train Tracker] ERROR during export: " + e)
+        print("[Train Tracker AI] ERROR during export: " + e)
     }
 }
 
@@ -214,7 +229,7 @@ function extract_schedule_info(train_data, schedule, convoy) {
 
     } catch (e) {
         if (config.debug) {
-            print("[Train Tracker] Warning: Could not extract schedule info: " + e)
+            print("[Train Tracker AI] Warning: Could not extract schedule info: " + e)
         }
         train_data.current_halt <- null
         train_data.next_halt <- null
@@ -232,51 +247,20 @@ function write_json_file(json_string) {
             f.writestr(json_string)
             f.close()
         } else {
-            print("[Train Tracker] ERROR: Cannot open output file: " + config.output_file)
+            print("[Train Tracker AI] ERROR: Cannot open output file: " + config.output_file)
         }
     } catch (e) {
-        print("[Train Tracker] ERROR writing file: " + e)
+        print("[Train Tracker AI] ERROR writing file: " + e)
     }
 }
 
 /**
- * Scenario text functions (required by Simutrans)
+ * Save persistent data
+ * Called when game is saved
  */
-function get_rule_text(pl) {
-    return "このシナリオは列車の位置を追跡し、JSONファイルに出力します。"
-}
-
-function get_goal_text(pl) {
-    return "列車を走らせて、Web上で位置を確認してください。"
-}
-
-function get_info_text(pl) {
-    return "エクスポート回数: " + persistent.export_count + "\n" +
-           "最終エクスポート: " + persistent.last_export_ticks + " ticks\n" +
-           "出力ファイル: " + config.output_file
-}
-
-function get_result_text(pl) {
-    return get_info_text(pl)
-}
-
-function get_about_text(pl) {
-    return "<em>列車位置追跡システム</em><br>" +
-           "バージョン: " + scenario.version + "<br>" +
-           "作者: " + scenario.author + "<br><br>" +
-           "このシナリオは列車の位置情報を定期的にJSONファイルに出力します。<br>" +
-           "Webサーバーと組み合わせて使用することで、ブラウザから列車位置を確認できます。"
-}
-
-// Allow all tools (this is a monitoring scenario, not a restriction scenario)
-function is_tool_allowed(pl, tool_id, wt) {
-    return true
-}
-
-function is_work_allowed_here(pl, tool_id, pos) {
-    return null
-}
-
-function is_schedule_allowed(pl, schedule) {
-    return null
+function save() {
+    return "persistent <- { " +
+           "last_export_ticks = " + persistent.last_export_ticks + ", " +
+           "export_count = " + persistent.export_count + ", " +
+           "ai_player = null }"
 }

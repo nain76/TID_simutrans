@@ -72,7 +72,7 @@
 
 ## インストール手順
 
-### ステップ1: Squirrelスクリプトの配置
+### ステップ1: AIスクリプトの配置
 
 #### Linux の場合
 
@@ -81,8 +81,8 @@
 cd /path/to/simutrans
 
 # スクリプトをコピー
-mkdir -p scenario/train_tracker
-cp -r /path/to/repository/simutrans/scenario/train_tracker/* scenario/train_tracker/
+mkdir -p ai/train_tracker
+cp -r /path/to/repository/simutrans/ai/train_tracker/* ai/train_tracker/
 ```
 
 #### Windows の場合
@@ -92,13 +92,13 @@ cp -r /path/to/repository/simutrans/scenario/train_tracker/* scenario/train_trac
 cd C:\path\to\simutrans
 
 :: ディレクトリを作成
-mkdir scenario\train_tracker
+mkdir ai\train_tracker
 
 :: スクリプトをコピー
-xcopy /E /I C:\path\to\repository\simutrans\scenario\train_tracker scenario\train_tracker
+xcopy /E /I C:\path\to\repository\simutrans\ai\train_tracker ai\train_tracker
 ```
 
-**確認**: `scenario/train_tracker/scenario.nut` が存在することを確認
+**確認**: `ai/train_tracker/ai.nut` が存在することを確認
 
 ### ステップ2: Webサーバーのセットアップ
 
@@ -169,19 +169,22 @@ DEBUG=false
 
 **重要**: `AUTH_PASSWORD` は必ず強力なパスワードに変更してください！
 
-### ステップ3: Simutransでシナリオを読み込み
+### ステップ3: SimutransでAIスクリプトを読み込み
 
-1. **Simutransを起動**
-2. **「Scenario」メニューを開く**（または `S` キー）
-3. **`train_tracker/scenario.nut` を選択**
-4. **「Load」ボタンをクリック**
+1. **Simutransを起動**し、既存のゲームをロードまたは新規ゲームを開始
+2. **新しいAIプレイヤーを追加:**
+   - メニューから **「プレイヤー」→「新しいプレイヤー」** を選択
+   - または画面下部の**プレイヤー管理ボタン**をクリック
+3. **空きスロットを選択**し、**「AIプレイヤーを追加」** をクリック
+4. **AIスクリプト選択画面**で `train_tracker` を選択
+5. **「選択」** をクリック
 
-シナリオが読み込まれると、コンソールに以下のように表示されます:
+AIプレイヤーが追加されると、コンソール（`~` キーで表示）に以下のように表示されます:
 
 ```
-[Train Tracker] Scenario started
-[Train Tracker] Export interval: ~30 seconds
-[Train Tracker] Output file: train_positions.json
+[Train Tracker AI] Started for player: AI Player
+[Train Tracker AI] Export interval: ~30 seconds
+[Train Tracker AI] Output file: train_positions.json
 ```
 
 ### ステップ4: Webサーバーの起動

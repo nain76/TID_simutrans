@@ -38,18 +38,18 @@ Webブラウザ (HTML/CSS/JS)
 
 ### インストール（5分で完了）
 
-#### 1. Squirrelスクリプトの配置
+#### 1. AIスクリプトの配置
 
 **Linux:**
 ```bash
 cd /path/to/simutrans
-cp -r simutrans/scenario/train_tracker scenario/
+cp -r simutrans/ai/train_tracker ai/
 ```
 
 **Windows:**
 ```cmd
 cd C:\path\to\simutrans
-xcopy /E /I simutrans\scenario\train_tracker scenario\train_tracker
+xcopy /E /I simutrans\ai\train_tracker ai\train_tracker
 ```
 
 #### 2. Webサーバーのセットアップ
@@ -64,11 +64,11 @@ cp .env.example .env
 # .env を編集してJSON_PATHとパスワードを設定
 ```
 
-#### 3. Simutransでシナリオを読み込み
+#### 3. SimutransでAIスクリプトを読み込み
 
-1. Simutransを起動
-2. メニューから「Scenario」を選択
-3. `train_tracker/scenario.nut` を選択して読み込み
+1. Simutransを起動（既存ゲームまたは新規ゲーム）
+2. 新しいAIプレイヤーを追加
+3. AIスクリプトで `train_tracker` を選択
 
 #### 4. Webサーバーを起動
 
@@ -121,7 +121,7 @@ http://localhost:5000
 
 ### データが表示されない
 
-1. Simutransでシナリオが読み込まれているか確認
+1. SimutransでAIスクリプトが読み込まれているか確認（AIプレイヤー一覧に表示されているか）
 2. `train_positions.json` が生成されているか確認
 3. `.env` の `JSON_PATH` が正しいか確認
 
