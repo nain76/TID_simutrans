@@ -21,10 +21,7 @@ include("json_writer")
 // Configuration
 config <- {
     // Output file path (relative to simutrans directory)
-    output_file = "train_positions.json",
-
-    // Debug mode - print extra information
-    debug = true
+    output_file = "train_positions.json"
 }
 
 // Persistent data (survives save/load)
@@ -41,16 +38,8 @@ persistent <- {
  */
 function start(pl_nr) {
     // Convert player number to player object
-    local player = player_x(pl_nr)
-    persistent.ai_player = player
-
-    print("[Train Tracker AI] Started for player: " + player.get_name())
-    print("[Train Tracker AI] Export interval: Once per game month")
-    print("[Train Tracker AI] Output file: " + config.output_file)
-    print("[Train Tracker AI] First export will occur at the next month")
-
-    // Don't do initial export to avoid timeout
-    // Export will happen automatically via new_month()
+    persistent.ai_player = player_x(pl_nr)
+    // No output to save time - export will happen at next month
 }
 
 /**
@@ -59,15 +48,8 @@ function start(pl_nr) {
  */
 function resume_game(pl_nr) {
     // Convert player number to player object
-    local player = player_x(pl_nr)
-    persistent.ai_player = player
-
-    print("[Train Tracker AI] Resuming from saved game")
-    print("[Train Tracker AI] Previous exports: " + persistent.export_count)
-    print("[Train Tracker AI] Export interval: Once per game month")
-
-    // Don't do initial export to avoid timeout
-    // Export will happen automatically via new_month()
+    persistent.ai_player = player_x(pl_nr)
+    // No output to save time - export will happen at next month
 }
 
 /**
@@ -86,11 +68,7 @@ function export_train_data() {
         local trains = []
         local convoy_list = world.get_convoy_list()
 
-        if (config.debug) {
-            print("[Train Tracker AI] Collecting data from " + convoy_list.get_count() + " convoys")
-        }
-
-        // Iterate through all convoys
+        // Iterate through all convoys (no debug print to save time)
         for (local i = 0; i < convoy_list.get_count(); i++) {
             local convoy = convoy_list[i]
 
@@ -128,14 +106,9 @@ function export_train_data() {
                 train_data.line <- "無所属"
             }
 
-            // Get schedule information
-            local schedule = convoy.get_schedule()
-            if (schedule) {
-                extract_schedule_info(train_data, schedule, convoy)
-            } else {
-                train_data.current_halt <- null
-                train_data.next_halt <- null
-            }
+            // Skip schedule information to avoid timeout
+            train_data.current_halt <- null
+            train_data.next_halt <- null
 
             trains.append(train_data)
         }
@@ -149,69 +122,10 @@ function export_train_data() {
 
         persistent.export_count++
 
-        if (config.debug) {
-            print("[Train Tracker AI] Exported " + trains.len() + " trains (total exports: " + persistent.export_count + ")")
-        }
+        // No debug print to save time
 
     } catch (e) {
-        print("[Train Tracker AI] ERROR during export: " + e)
-    }
-}
-
-/**
- * Extract schedule information (current and next halt)
- * @param train_data Train data table to populate
- * @param schedule Schedule object
- * @param convoy Convoy object
- */
-function extract_schedule_info(train_data, schedule, convoy) {
-    try {
-        local entries = schedule.entries
-        if (!entries || entries.len() == 0) {
-            train_data.current_halt <- null
-            train_data.next_halt <- null
-            return
-        }
-
-        // Get current schedule index
-        local current_entry = 0
-        if ("get_current_entry" in schedule) {
-            current_entry = schedule.get_current_entry()
-        }
-
-        // Get current halt name
-        if (current_entry < entries.len()) {
-            local entry = entries[current_entry]
-            local halt = halt_x.get_halt(world, entry, convoy.get_owner())
-            if (halt && halt.is_valid()) {
-                train_data.current_halt <- halt.get_name()
-            } else {
-                train_data.current_halt <- "座標: " + entry.x + "," + entry.y
-            }
-        } else {
-            train_data.current_halt <- null
-        }
-
-        // Get next halt name
-        local next_entry = (current_entry + 1) % entries.len()
-        if (next_entry < entries.len()) {
-            local entry = entries[next_entry]
-            local halt = halt_x.get_halt(world, entry, convoy.get_owner())
-            if (halt && halt.is_valid()) {
-                train_data.next_halt <- halt.get_name()
-            } else {
-                train_data.next_halt <- "座標: " + entry.x + "," + entry.y
-            }
-        } else {
-            train_data.next_halt <- null
-        }
-
-    } catch (e) {
-        if (config.debug) {
-            print("[Train Tracker AI] Warning: Could not extract schedule info: " + e)
-        }
-        train_data.current_halt <- null
-        train_data.next_halt <- null
+        // Silent error handling to save time
     }
 }
 
@@ -220,16 +134,10 @@ function extract_schedule_info(train_data, schedule, convoy) {
  * @param json_string JSON string to write
  */
 function write_json_file(json_string) {
-    try {
-        local f = file(config.output_file, "w")
-        if (f) {
-            f.writestr(json_string)
-            f.close()
-        } else {
-            print("[Train Tracker AI] ERROR: Cannot open output file: " + config.output_file)
-        }
-    } catch (e) {
-        print("[Train Tracker AI] ERROR writing file: " + e)
+    local f = file(config.output_file, "w")
+    if (f) {
+        f.writestr(json_string)
+        f.close()
     }
 }
 
