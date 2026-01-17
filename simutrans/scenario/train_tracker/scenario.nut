@@ -12,6 +12,9 @@
 include("waytype_translator")
 include("json_writer")
 
+// Map file - empty string means use current map
+map.file = ""
+
 // Scenario metadata
 scenario.short_description = "列車位置追跡システム"
 scenario.author = "Claude Code"
