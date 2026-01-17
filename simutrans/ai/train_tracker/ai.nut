@@ -20,9 +20,6 @@ include("json_writer")
 
 // Configuration
 config <- {
-    // Export interval in game ticks (approximately 30 seconds)
-    export_interval_ticks = 600,
-
     // Output file path (relative to simutrans directory)
     output_file = "train_positions.json",
 
@@ -48,12 +45,12 @@ function start(pl_nr) {
     persistent.ai_player = player
 
     print("[Train Tracker AI] Started for player: " + player.get_name())
-    print("[Train Tracker AI] Export interval: ~" + (config.export_interval_ticks / 20) + " seconds")
+    print("[Train Tracker AI] Export interval: Once per game month")
     print("[Train Tracker AI] Output file: " + config.output_file)
-    print("[Train Tracker AI] First export will occur in ~30 seconds")
+    print("[Train Tracker AI] First export will occur at the next month")
 
     // Don't do initial export to avoid timeout
-    // Export will happen automatically via new_month() or step()
+    // Export will happen automatically via new_month()
 }
 
 /**
@@ -67,41 +64,18 @@ function resume_game(pl_nr) {
 
     print("[Train Tracker AI] Resuming from saved game")
     print("[Train Tracker AI] Previous exports: " + persistent.export_count)
+    print("[Train Tracker AI] Export interval: Once per game month")
 
     // Don't do initial export to avoid timeout
-    // Export will happen automatically via new_month() or step()
+    // Export will happen automatically via new_month()
 }
 
 /**
  * Called every game month
- * We use this to trigger exports at regular intervals
+ * Export train data once per month
  */
 function new_month() {
-    check_and_export()
-}
-
-/**
- * Called every game tick (optional)
- * We check the tick counter here for more precise timing
- */
-function step() {
-    check_and_export()
-}
-
-/**
- * Check if it's time to export and do so if needed
- */
-function check_and_export() {
-    local current_time = world.get_time()
-    local current_ticks = current_time.ticks
-
-    // Check if enough ticks have passed
-    local ticks_since_last = current_ticks - persistent.last_export_ticks
-
-    if (ticks_since_last >= config.export_interval_ticks) {
-        export_train_data()
-        persistent.last_export_ticks = current_ticks
-    }
+    export_train_data()
 }
 
 /**
