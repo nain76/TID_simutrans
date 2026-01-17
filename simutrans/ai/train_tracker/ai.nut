@@ -40,12 +40,14 @@ persistent <- {
 /**
  * AI initialization
  * Called when AI is first started
- * @param pl Player object for this AI
+ * @param pl_nr Player number (integer)
  */
-function start(pl) {
-    persistent.ai_player = pl
+function start(pl_nr) {
+    // Convert player number to player object
+    local player = player_x(pl_nr)
+    persistent.ai_player = player
 
-    print("[Train Tracker AI] Started for player: " + pl.get_name())
+    print("[Train Tracker AI] Started for player: " + player.get_name())
     print("[Train Tracker AI] Export interval: ~" + (config.export_interval_ticks / 20) + " seconds")
     print("[Train Tracker AI] Output file: " + config.output_file)
 
@@ -55,10 +57,12 @@ function start(pl) {
 
 /**
  * Resume from saved game
- * @param pl Player object for this AI
+ * @param pl_nr Player number (integer)
  */
-function resume_game(pl) {
-    persistent.ai_player = pl
+function resume_game(pl_nr) {
+    // Convert player number to player object
+    local player = player_x(pl_nr)
+    persistent.ai_player = player
 
     print("[Train Tracker AI] Resuming from saved game")
     print("[Train Tracker AI] Previous exports: " + persistent.export_count)
