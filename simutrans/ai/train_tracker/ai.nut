@@ -52,8 +52,7 @@ persistent <- {
 function start(pl_nr) {
     // Convert player number to player object
     persistent.ai_player = player_x(pl_nr)
-    persistent.initial_export_done = false
-    // Initial export will happen in first new_month() call
+    // Export will happen at next month
 }
 
 /**
@@ -68,28 +67,14 @@ function resume_game(pl_nr) {
 
 /**
  * Called every game month
- * Alternates between train data (even months) and station data (odd months)
- * to avoid resource conflicts
+ * Exports both train and station data every month
+ * Uses yield to prevent timeout with large datasets
  */
 function new_month() {
-    // On first call, export both files to ensure they exist
-    if (!persistent.initial_export_done) {
-        export_train_data()
-        export_station_data()
-        persistent.initial_export_done = true
-        return
-    }
-
-    local game_time = world.get_time()
-    local month = game_time.month  // 0-11 (0=January, 11=December)
-
-    if (month % 2 == 0) {
-        // Even months (0,2,4,6,8,10): Export train data
-        export_train_data()
-    } else {
-        // Odd months (1,3,5,7,9,11): Export station data
-        export_station_data()
-    }
+    // Export both files every month
+    // Yield mechanism prevents timeout issues
+    export_train_data()
+    export_station_data()
 }
 
 /**
