@@ -88,27 +88,39 @@ function setupEventListeners() {
  */
 async function loadStationData() {
     try {
+        console.log('[Diagram] Fetching station data from', API_URL);
         const response = await fetch(API_URL);
+        console.log('[Diagram] Response status:', response.status);
+
         const data = await response.json();
+        console.log('[Diagram] Station data received:', data);
+
+        if (data.error) {
+            console.error('[Diagram] API returned error:', data.error);
+            updateConnectionStatus(false, data.error);
+            return;
+        }
 
         if (data.lines && data.lines.length > 0) {
+            console.log('[Diagram] Found', data.lines.length, 'lines');
             stationData = data;
 
             // On initial load, select all lines
             if (selectedLines.size === 0) {
                 stationData.lines.forEach(line => selectedLines.add(line.name));
+                console.log('[Diagram] Selected all lines:', selectedLines.size);
             }
 
             updateLineSelector();
             renderDiagram();
             updateConnectionStatus(true);
         } else {
-            console.warn('No station data available');
+            console.warn('[Diagram] No station data available in response');
             updateConnectionStatus(false, 'No station data');
         }
     } catch (error) {
-        console.error('Error loading station data:', error);
-        updateConnectionStatus(false, 'Error loading data');
+        console.error('[Diagram] Error loading station data:', error);
+        updateConnectionStatus(false, 'Error loading data: ' + error.message);
     }
 }
 
