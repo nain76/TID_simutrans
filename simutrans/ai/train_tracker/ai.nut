@@ -40,7 +40,8 @@ config <- {
 persistent <- {
     last_export_ticks = 0,
     export_count = 0,
-    ai_player = null  // Store AI player reference
+    ai_player = null,  // Store AI player reference
+    initial_export_done = false  // Track if initial export completed
 }
 
 /**
@@ -51,7 +52,8 @@ persistent <- {
 function start(pl_nr) {
     // Convert player number to player object
     persistent.ai_player = player_x(pl_nr)
-    // No output to save time - export will happen at next month
+    persistent.initial_export_done = false
+    // Initial export will happen in first new_month() call
 }
 
 /**
@@ -70,6 +72,14 @@ function resume_game(pl_nr) {
  * to avoid resource conflicts
  */
 function new_month() {
+    // On first call, export both files to ensure they exist
+    if (!persistent.initial_export_done) {
+        export_train_data()
+        export_station_data()
+        persistent.initial_export_done = true
+        return
+    }
+
     local game_time = world.get_time()
     local month = game_time.month  // 0-11 (0=January, 11=December)
 
@@ -260,5 +270,6 @@ function save() {
     return "persistent <- { " +
            "last_export_ticks = " + persistent.last_export_ticks + ", " +
            "export_count = " + persistent.export_count + ", " +
-           "ai_player = null }"
+           "ai_player = null, " +
+           "initial_export_done = " + (persistent.initial_export_done ? "true" : "false") + " }"
 }
