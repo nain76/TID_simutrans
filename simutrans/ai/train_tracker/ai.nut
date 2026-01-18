@@ -227,21 +227,17 @@ function export_station_data() {
 
             // Extract stations from schedule entries with yield
             foreach (entry in _step_generator(schedule.entries)) {
-                // Get halt position from entry
-                local pos = entry.get_halt(null)
+                // Get halt directly from entry with proper player
+                local halt = entry.get_halt(persistent.ai_player)
 
-                if (pos) {
-                    // Get halt object from position
-                    local halt = halt_x.get_halt(pos, null)
-                    if (halt && halt.is_valid()) {
-                        local station_data = {
-                            name = halt.get_name(),
-                            x = pos.x,
-                            y = pos.y,
-                            z = pos.z
-                        }
-                        stations.append(station_data)
+                if (halt && halt.is_valid()) {
+                    local station_data = {
+                        name = halt.get_name(),
+                        x = entry.x,
+                        y = entry.y,
+                        z = entry.z
                     }
+                    stations.append(station_data)
                 }
             }
 
