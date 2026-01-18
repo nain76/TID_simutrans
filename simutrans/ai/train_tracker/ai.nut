@@ -18,6 +18,17 @@
 include("waytype_translator")
 include("json_writer")
 
+/**
+ * Generator function to yield items one by one
+ * This prevents timeout by giving control back to game engine
+ * @param iteratable Array or list to iterate
+ */
+function _step_generator(iteratable) {
+    foreach (obj in iteratable) {
+        yield obj
+    }
+}
+
 // Configuration
 config <- {
     // Output file path (relative to simutrans directory)
@@ -77,9 +88,16 @@ function export_train_data() {
         local trains = []
         local convoy_list = world.get_convoy_list()
 
-        // Iterate through all convoys (no debug print to save time)
+        // Convert convoy_list to array for generator
+        local convoy_array = []
         for (local i = 0; i < convoy_list.get_count(); i++) {
-            local convoy = convoy_list[i]
+            convoy_array.append({idx = i, convoy = convoy_list[i]})
+        }
+
+        // Iterate through all convoys with yield for timeout prevention
+        foreach (item in _step_generator(convoy_array)) {
+            local convoy = item.convoy
+            local i = item.idx
 
             if (!convoy.is_valid()) continue
 
@@ -147,10 +165,14 @@ function export_station_data() {
         local lines_data = []
         local line_list = world.get_line_list()
 
-        // Iterate through all lines
+        // Convert line_list to array for generator
+        local line_array = []
         for (local i = 0; i < line_list.get_count(); i++) {
-            local line = line_list[i]
+            line_array.append(line_list[i])
+        }
 
+        // Iterate through all lines with yield for timeout prevention
+        foreach (line in _step_generator(line_array)) {
             if (!line.is_valid()) continue
 
             // Filter: only track rail and tram lines
@@ -162,11 +184,9 @@ function export_station_data() {
             if (!schedule || !schedule.is_valid()) continue
 
             local stations = []
-            local entry_count = schedule.entries.len()
 
-            // Extract all halt entries from schedule
-            for (local j = 0; j < entry_count; j++) {
-                local entry = schedule.entries[j]
+            // Use generator for schedule entries too
+            foreach (entry in _step_generator(schedule.entries)) {
                 local pos = entry.get_halt(null)
 
                 if (pos) {
