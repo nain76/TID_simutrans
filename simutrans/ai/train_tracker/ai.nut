@@ -232,7 +232,7 @@ function export_station_data() {
 
                 if (pos) {
                     // Get halt object from position
-                    local halt = halt_x.get_halt(world, pos, null)
+                    local halt = halt_x.get_halt(pos, null)
                     if (halt && halt.is_valid()) {
                         local station_data = {
                             name = halt.get_name(),
