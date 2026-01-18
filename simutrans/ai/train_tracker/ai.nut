@@ -29,6 +29,23 @@ function _step_generator(iteratable) {
     }
 }
 
+/**
+ * Debug logging function
+ * Writes debug messages to a log file
+ */
+function debug_log(message) {
+    try {
+        local f = file("station_export_debug.log", "a")
+        if (f) {
+            local game_time = world.get_time()
+            f.writestr("[" + game_time.year + "-" + (game_time.month + 1) + "] " + message + "\n")
+            f.close()
+        }
+    } catch (e) {
+        // Ignore logging errors
+    }
+}
+
 // Configuration
 config <- {
     // Output file path (relative to simutrans directory)
@@ -163,10 +180,14 @@ function export_station_data() {
 
         // Get line list from AI player (not world)
         if (!persistent.ai_player || !persistent.ai_player.is_valid()) {
+            debug_log("export_station_data: ai_player not valid")
+            local json_string = build_station_json(lines_data)
+            write_station_file(json_string)
             return  // Player not available
         }
 
         local line_list = persistent.ai_player.get_line_list()
+        debug_log("export_station_data: found " + line_list.get_count() + " lines")
 
         // Convert line_list to array for generator
         local line_array = []
@@ -174,13 +195,19 @@ function export_station_data() {
             line_array.append(line_list[i])
         }
 
+        local processed = 0
+        local filtered = 0
+
         // Iterate through all lines with yield for timeout prevention
         foreach (line in _step_generator(line_array)) {
             if (!line.is_valid()) continue
 
             // Filter: only track rail and tram lines
             local wt = line.get_waytype()
-            if (!should_track_waytype(wt)) continue
+            if (!should_track_waytype(wt)) {
+                filtered++
+                continue
+            }
 
             // Get line schedule
             local schedule = line.get_schedule()
@@ -215,15 +242,18 @@ function export_station_data() {
                     stations = stations
                 }
                 lines_data.append(line_data)
+                processed++
             }
         }
+
+        debug_log("export_station_data: processed=" + processed + " filtered=" + filtered + " total_lines=" + lines_data.len())
 
         // Build JSON and write to file
         local json_string = build_station_json(lines_data)
         write_station_file(json_string)
 
     } catch (e) {
-        // Silent error handling
+        debug_log("Error in export_station_data: " + e)
     }
 }
 
