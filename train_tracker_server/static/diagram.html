@@ -31,6 +31,10 @@
             <aside class="sidebar">
                 <div class="sidebar-section">
                     <h3>路線選択</h3>
+                    <div class="filter-actions" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <button onclick="selectAllLines()" class="btn-small" style="flex: 1; padding: 0.4rem; font-size: 0.85rem;">全選択</button>
+                        <button onclick="deselectAllLines()" class="btn-small" style="flex: 1; padding: 0.4rem; font-size: 0.85rem;">全解除</button>
+                    </div>
                     <div id="line-selector" class="line-selector">
                         <p class="loading-text">路線データ読み込み中...</p>
                     </div>

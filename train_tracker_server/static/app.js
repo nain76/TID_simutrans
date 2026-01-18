@@ -85,6 +85,12 @@ async function loadLines() {
 
         const data = await response.json();
         allLines = data.lines || [];
+
+        // On initial load (if no lines selected and nothing in localStorage), select all
+        if (selectedLines.size === 0 && !localStorage.getItem('selectedLines')) {
+            selectedLines = new Set(allLines);
+        }
+
         renderLineCheckboxes();
 
     } catch (error) {
@@ -109,16 +115,11 @@ function renderLineCheckboxes() {
                 type="checkbox"
                 value="${escapeHtml(line)}"
                 onchange="toggleLine('${escapeHtml(line).replace(/'/g, "\\'")}')"
-                ${selectedLines.has(line) || selectedLines.size === 0 ? 'checked' : ''}
+                ${selectedLines.has(line) ? 'checked' : ''}
             >
             ${escapeHtml(line)}
         </label>
     `).join('');
-
-    // If no lines selected yet, select all
-    if (selectedLines.size === 0) {
-        selectedLines = new Set(allLines);
-    }
 }
 
 /**

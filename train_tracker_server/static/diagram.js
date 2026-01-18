@@ -93,6 +93,12 @@ async function loadStationData() {
 
         if (data.lines && data.lines.length > 0) {
             stationData = data;
+
+            // On initial load, select all lines
+            if (selectedLines.size === 0) {
+                stationData.lines.forEach(line => selectedLines.add(line.name));
+            }
+
             updateLineSelector();
             renderDiagram();
             updateConnectionStatus(true);
@@ -152,12 +158,6 @@ function updateLineSelector() {
     }).join('');
 
     selector.innerHTML = lineItems;
-
-    // If no lines selected, select all by default
-    if (selectedLines.size === 0) {
-        stationData.lines.forEach(line => selectedLines.add(line.name));
-        updateLineSelector(); // Re-render to show checkboxes
-    }
 }
 
 /**
@@ -169,6 +169,26 @@ function toggleLine(lineName) {
     } else {
         selectedLines.add(lineName);
     }
+    renderDiagram();
+}
+
+/**
+ * Select all lines
+ */
+function selectAllLines() {
+    if (!stationData || !stationData.lines) return;
+    selectedLines.clear();
+    stationData.lines.forEach(line => selectedLines.add(line.name));
+    updateLineSelector();
+    renderDiagram();
+}
+
+/**
+ * Deselect all lines
+ */
+function deselectAllLines() {
+    selectedLines.clear();
+    updateLineSelector();
     renderDiagram();
 }
 
