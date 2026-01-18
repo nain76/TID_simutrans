@@ -104,6 +104,28 @@ function build_train_json(trains, game_time) {
 }
 
 /**
+ * Build station data JSON
+ * @param lines_data Array of line data tables with stations
+ * @return JSON string
+ */
+function build_station_json(lines_data) {
+    local timestamp = format_timestamp()
+    local game_time = world.get_time()
+
+    local root = {
+        timestamp = timestamp,
+        game_time = {
+            year = game_time.year,
+            month = game_time.month,
+            ticks = game_time.ticks
+        },
+        lines = lines_data
+    }
+
+    return to_json(root)
+}
+
+/**
  * Format current real-world timestamp
  * @return ISO 8601 timestamp string (approximation)
  */

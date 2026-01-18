@@ -21,6 +21,7 @@ app = Flask(__name__)
 
 # Configuration from environment variables
 JSON_PATH = os.environ.get('JSON_PATH', str(Path.cwd() / 'train_positions.json'))
+STATION_JSON_PATH = os.environ.get('STATION_JSON_PATH', str(Path.cwd() / 'station_data.json'))
 USERNAME = os.environ.get('AUTH_USERNAME', 'admin')
 PASSWORD = os.environ.get('AUTH_PASSWORD', 'changeme')
 PORT = int(os.environ.get('PORT', 5000))
@@ -28,6 +29,7 @@ DEBUG = os.environ.get('DEBUG', 'false').lower() == 'true'
 
 print(f"[Train Tracker Server] Starting...")
 print(f"[Train Tracker Server] JSON Path: {JSON_PATH}")
+print(f"[Train Tracker Server] Station JSON Path: {STATION_JSON_PATH}")
 print(f"[Train Tracker Server] Port: {PORT}")
 print(f"[Train Tracker Server] Debug: {DEBUG}")
 
@@ -83,12 +85,24 @@ def requires_auth(f):
 @requires_auth
 def index():
     """
-    Serve the main HTML page
+    Serve the main HTML page (table view)
 
     Returns:
         HTML file
     """
     return send_from_directory('static', 'index.html')
+
+
+@app.route('/diagram')
+@requires_auth
+def diagram():
+    """
+    Serve the diagram HTML page (visual railroad diagram)
+
+    Returns:
+        HTML file
+    """
+    return send_from_directory('static', 'diagram.html')
 
 
 @app.route('/static/<path:filename>')
@@ -165,6 +179,62 @@ def get_lines():
             return jsonify({"lines": []})
     except Exception as e:
         return jsonify({"lines": [], "error": str(e)}), 500
+
+
+@app.route('/api/stations')
+@requires_auth
+def get_stations():
+    """
+    Get station data for all lines
+
+    Returns:
+        JSON response with station data organized by line
+    """
+    try:
+        if os.path.exists(STATION_JSON_PATH):
+            with open(STATION_JSON_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return jsonify(data)
+        else:
+            return jsonify({
+                "timestamp": datetime.now().isoformat(),
+                "lines": [],
+                "error": "Station data file not found. Waiting for yearly export or manual trigger."
+            })
+    except json.JSONDecodeError as e:
+        return jsonify({
+            "timestamp": datetime.now().isoformat(),
+            "lines": [],
+            "error": f"Invalid JSON format: {str(e)}"
+        }), 500
+    except Exception as e:
+        return jsonify({
+            "timestamp": datetime.now().isoformat(),
+            "lines": [],
+            "error": f"Error reading station data: {str(e)}"
+        }), 500
+
+
+@app.route('/api/line-config')
+@requires_auth
+def get_line_config():
+    """
+    Get manual line configuration for custom station positioning (optional)
+
+    Returns:
+        JSON response with manual station positions or 404 if not configured
+    """
+    config_path = Path(JSON_PATH).parent / 'line_config.json'
+
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return jsonify(data)
+        else:
+            return jsonify({}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/health')

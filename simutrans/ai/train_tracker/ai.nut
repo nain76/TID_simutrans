@@ -21,7 +21,8 @@ include("json_writer")
 // Configuration
 config <- {
     // Output file path (relative to simutrans directory)
-    output_file = "train_positions.json"
+    output_file = "train_positions.json",
+    station_file = "station_data.json"
 }
 
 // Persistent data (survives save/load)
@@ -58,6 +59,14 @@ function resume_game(pl_nr) {
  */
 function new_month() {
     export_train_data()
+}
+
+/**
+ * Called every game year
+ * Export station data once per year (manual trigger)
+ */
+function new_year() {
+    export_station_data()
 }
 
 /**
@@ -130,11 +139,91 @@ function export_train_data() {
 }
 
 /**
+ * Export station data for all rail/tram lines
+ * Called once per year
+ */
+function export_station_data() {
+    try {
+        local lines_data = []
+        local line_list = world.get_line_list()
+
+        // Iterate through all lines
+        for (local i = 0; i < line_list.get_count(); i++) {
+            local line = line_list[i]
+
+            if (!line.is_valid()) continue
+
+            // Filter: only track rail and tram lines
+            local wt = line.get_waytype()
+            if (!should_track_waytype(wt)) continue
+
+            // Get line schedule
+            local schedule = line.get_schedule()
+            if (!schedule || !schedule.is_valid()) continue
+
+            local stations = []
+            local entry_count = schedule.entries.len()
+
+            // Extract all halt entries from schedule
+            for (local j = 0; j < entry_count; j++) {
+                local entry = schedule.entries[j]
+                local pos = entry.get_halt(null)
+
+                if (pos) {
+                    local halt = halt_x.get_halt(world, pos)
+                    if (halt && halt.is_valid()) {
+                        local station_data = {
+                            name = halt.get_name(),
+                            x = pos.x,
+                            y = pos.y,
+                            z = pos.z
+                        }
+                        stations.append(station_data)
+                    }
+                }
+            }
+
+            // Only add line if it has stations
+            if (stations.len() > 0) {
+                local line_data = {
+                    name = line.get_name(),
+                    waytype = get_waytype_en(wt),
+                    waytype_ja = get_waytype_ja(wt),
+                    stations = stations
+                }
+                lines_data.append(line_data)
+            }
+        }
+
+        // Build JSON
+        local json_string = build_station_json(lines_data)
+
+        // Write to file
+        write_station_file(json_string)
+
+    } catch (e) {
+        // Silent error handling
+    }
+}
+
+/**
  * Write JSON string to file
  * @param json_string JSON string to write
  */
 function write_json_file(json_string) {
     local f = file(config.output_file, "w")
+    if (f) {
+        f.writestr(json_string)
+        f.close()
+    }
+}
+
+/**
+ * Write station JSON string to file
+ * @param json_string JSON string to write
+ */
+function write_station_file(json_string) {
+    local f = file(config.station_file, "w")
     if (f) {
         f.writestr(json_string)
         f.close()

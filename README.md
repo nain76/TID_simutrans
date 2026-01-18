@@ -10,6 +10,8 @@ Simutrans OTRPで走行中の列車の位置をWeb上でリアルタイムに確
 
 - ✅ **本体コード変更不要**: Squirrelスクリプトで実装、Simutrans本体のビルドは不要
 - 🌐 **Webブラウザで表示**: 任意の端末からブラウザでアクセス可能
+- 🗺️ **視覚的な路線図**: SVGベースの路線図ダイアグラム表示 ⭐ NEW!
+- 📋 **2つの表示モード**: テーブル表示と路線図表示を切り替え可能
 - 🔒 **Basic認証対応**: ユーザー名・パスワードでアクセス制御
 - 📊 **横長レイアウト**: ワイドスクリーン最適化されたUI
 - 🔍 **高機能フィルタ**: 路線、検索、線路種別での絞り込み
@@ -20,12 +22,15 @@ Simutrans OTRPで走行中の列車の位置をWeb上でリアルタイムに確
 
 ```
 Simutrans (ゲーム)
-    ↓ Squirrelスクリプト (30秒ごと)
-train_positions.json (共有ファイル)
-    ↓ ファイル読み込み
+    ↓ Squirrel AIスクリプト
+    ├─ 列車データ (月1回) → train_positions.json
+    └─ 駅データ (年1回) → station_data.json
+           ↓ ファイル読み込み
 Python Flask Webサーバー
     ↓ HTTP/JSON API
-Webブラウザ (HTML/CSS/JS)
+Webブラウザ
+    ├─ テーブル表示 (HTML/CSS/JS)
+    └─ 路線図表示 (SVG Diagram) ⭐ NEW!
 ```
 
 ## クイックスタート

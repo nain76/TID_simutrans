@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>列車位置ダイアグラム - Train Position Diagram</title>
+    <link rel="stylesheet" href="diagram.css">
+</head>
+<body>
+    <div class="main-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>🚆 列車位置ダイアグラム</h1>
+                <div class="game-info">
+                    <span id="game-time">ゲーム時刻: --</span>
+                    <span class="separator">|</span>
+                    <span id="last-update">最終更新: --</span>
+                    <span class="separator">|</span>
+                    <span id="connection-status" class="status-connected">接続中</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button id="refresh-btn" class="btn-primary">手動更新</button>
+                <a href="index.html" class="btn-secondary">テーブル表示に戻る</a>
+            </div>
+        </header>
+
+        <div class="content-wrapper">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h3>路線選択</h3>
+                    <div id="line-selector" class="line-selector">
+                        <p class="loading-text">路線データ読み込み中...</p>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>表示設定</h3>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="show-station-names" checked>
+                        駅名を表示
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="show-train-names" checked>
+                        列車名を表示
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="show-speeds" checked>
+                        速度を表示
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="auto-layout" checked>
+                        自動レイアウト
+                    </label>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>統計情報</h3>
+                    <div class="stats">
+                        <div class="stat-item">
+                            <span class="stat-label">表示路線数:</span>
+                            <span id="stat-lines" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">表示列車数:</span>
+                            <span id="stat-trains" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">駅数:</span>
+                            <span id="stat-stations" class="stat-value">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>ヘルプ</h3>
+                    <div class="help-text">
+                        <p><strong>路線選択:</strong> 表示したい路線をチェック</p>
+                        <p><strong>駅データ:</strong> 年に1回自動エクスポート</p>
+                        <p><strong>列車位置:</strong> 月に1回更新</p>
+                        <p><strong>手動配置:</strong> line_config.json で駅位置を指定可能</p>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Diagram Area -->
+            <main class="diagram-container">
+                <div id="diagram-wrapper" class="diagram-wrapper">
+                    <svg id="railroad-diagram" class="railroad-diagram" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <!-- Marker for train direction -->
+                            <marker id="train-arrow" markerWidth="10" markerHeight="10" refX="5" refY="3" orient="auto" markerUnits="strokeWidth">
+                                <path d="M0,0 L0,6 L9,3 z" fill="#f00" />
+                            </marker>
+
+                            <!-- Station marker -->
+                            <circle id="station-marker" r="6" fill="#2c3e50" stroke="#fff" stroke-width="2"/>
+                        </defs>
+
+                        <!-- Diagram content will be generated here -->
+                        <g id="diagram-content">
+                            <text x="400" y="300" text-anchor="middle" class="no-data-message">
+                                路線を選択してください
+                            </text>
+                        </g>
+                    </svg>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="diagram.js"></script>
+</body>
+</html>
