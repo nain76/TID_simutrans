@@ -227,8 +227,8 @@ function export_station_data() {
 
             // Extract stations from schedule entries with yield
             foreach (entry in _step_generator(schedule.entries)) {
-                // Get halt directly from entry with proper player
-                local halt = entry.get_halt(persistent.ai_player)
+                // Get halt from tile at entry coordinates (all players)
+                local halt = tile_x(entry.x, entry.y, entry.z).get_halt()
 
                 if (halt && halt.is_valid()) {
                     local station_data = {
