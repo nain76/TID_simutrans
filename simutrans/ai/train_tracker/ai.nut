@@ -72,23 +72,45 @@ function resume_game(pl_nr) {
  * to avoid resource conflicts
  */
 function new_month() {
-    // On first call, export both files to ensure they exist
-    if (!persistent.initial_export_done) {
-        export_train_data()
-        export_station_data()
-        persistent.initial_export_done = true
-        return
-    }
+    try {
+        // Debug: Write log to confirm function is called
+        local f = file("new_month_log.txt", "a")
+        if (f) {
+            local game_time = world.get_time()
+            f.writestr("new_month called: " + game_time.year + "-" + (game_time.month + 1) +
+                      " initial_done=" + (persistent.initial_export_done ? "true" : "false") + "\n")
+            f.close()
+        }
 
-    local game_time = world.get_time()
-    local month = game_time.month  // 0-11 (0=January, 11=December)
+        // On first call, export both files to ensure they exist
+        if (!persistent.initial_export_done) {
+            export_train_data()
+            export_station_data()
+            persistent.initial_export_done = true
+            return
+        }
 
-    if (month % 2 == 0) {
-        // Even months (0,2,4,6,8,10): Export train data
-        export_train_data()
-    } else {
-        // Odd months (1,3,5,7,9,11): Export station data
-        export_station_data()
+        local game_time = world.get_time()
+        local month = game_time.month  // 0-11 (0=January, 11=December)
+
+        if (month % 2 == 0) {
+            // Even months (0,2,4,6,8,10): Export train data
+            export_train_data()
+        } else {
+            // Odd months (1,3,5,7,9,11): Export station data
+            export_station_data()
+        }
+    } catch (e) {
+        // Write error
+        try {
+            local f = file("new_month_error.txt", "w")
+            if (f) {
+                f.writestr("Error in new_month: " + e)
+                f.close()
+            }
+        } catch (e2) {
+            // Can't write error
+        }
     }
 }
 
@@ -227,14 +249,21 @@ function export_station_data() {
             }
         }
 
-        // Build JSON
+        // Always write file even if empty, to confirm function was called
         local json_string = build_station_json(lines_data)
-
-        // Write to file
         write_station_file(json_string)
 
     } catch (e) {
-        // Silent error handling
+        // Write error to a debug file
+        try {
+            local f = file("station_export_error.txt", "w")
+            if (f) {
+                f.writestr("Error in export_station_data: " + e)
+                f.close()
+            }
+        } catch (e2) {
+            // Can't even write error file
+        }
     }
 }
 
