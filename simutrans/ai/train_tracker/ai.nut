@@ -197,7 +197,13 @@ function export_train_data() {
 function export_station_data() {
     try {
         local lines_data = []
-        local line_list = world.get_line_list()
+
+        // Get line list from AI player (not world)
+        if (!persistent.ai_player || !persistent.ai_player.is_valid()) {
+            return  // Player not available
+        }
+
+        local line_list = persistent.ai_player.get_line_list()
 
         // Convert line_list to array for generator
         local line_array = []
