@@ -213,11 +213,22 @@ function export_station_data() {
 
         debug_log("export_station_data: found " + unique_lines.len() + " unique lines from convoys")
 
-        // Second pass: process each unique line to extract stations
-        local processed = 0
+        // Convert unique_lines table to array for generator
+        local lines_array = []
         foreach (line_name, line_info in unique_lines) {
-            local line = line_info.line
-            local wt = line_info.waytype
+            lines_array.append({
+                name = line_name,
+                line = line_info.line,
+                waytype = line_info.waytype
+            })
+        }
+
+        // Second pass: process each unique line to extract stations with yield
+        local processed = 0
+        foreach (line_obj in _step_generator(lines_array)) {
+            local line_name = line_obj.name
+            local line = line_obj.line
+            local wt = line_obj.waytype
 
             // Get line schedule
             local schedule = line.get_schedule()
