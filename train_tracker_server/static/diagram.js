@@ -1,24 +1,21 @@
 /**
- * Railroad Diagram Viewer
- * Visualizes train positions on a railroad network diagram
+ * Railroad Diagram Viewer - Real Coordinate Based
+ * Visualizes train positions using actual game coordinates
  */
 
 // Configuration
 const API_URL = '/api/stations';
 const TRAINS_API_URL = '/api/trains';
-const CONFIG_API_URL = '/api/line-config';
 const UPDATE_INTERVAL = 5000; // 5 seconds
 
 // State
 let stationData = null;
 let trainData = null;
-let lineConfig = null;
 let selectedLines = new Set();
 let displaySettings = {
     showStationNames: true,
     showTrainNames: true,
-    showSpeeds: true,
-    autoLayout: true
+    showSpeeds: true
 };
 
 // Line colors (automatically assigned)
@@ -27,6 +24,10 @@ const LINE_COLORS = [
     '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#6366f1',
     '#84cc16', '#f43f5e', '#a855f7', '#22c55e', '#eab308'
 ];
+
+// SVG viewport settings
+let viewBox = { minX: 0, minY: 0, width: 1000, height: 600 };
+let scale = 1;
 
 /**
  * Initialize the diagram viewer
@@ -40,8 +41,7 @@ async function init() {
     // Load initial data
     await Promise.all([
         loadStationData(),
-        loadTrainData(),
-        loadLineConfig()
+        loadTrainData()
     ]);
 
     // Start auto-update
@@ -79,11 +79,6 @@ function setupEventListeners() {
 
     document.getElementById('show-speeds').addEventListener('change', (e) => {
         displaySettings.showSpeeds = e.target.checked;
-        renderDiagram();
-    });
-
-    document.getElementById('auto-layout').addEventListener('change', (e) => {
-        displaySettings.autoLayout = e.target.checked;
         renderDiagram();
     });
 }
@@ -131,21 +126,6 @@ async function loadTrainData() {
 }
 
 /**
- * Load manual line configuration (optional)
- */
-async function loadLineConfig() {
-    try {
-        const response = await fetch(CONFIG_API_URL);
-        if (response.ok) {
-            lineConfig = await response.json();
-        }
-    } catch (error) {
-        // Config is optional, so this is not an error
-        console.log('No manual line configuration found (this is OK)');
-    }
-}
-
-/**
  * Update line selector in sidebar
  */
 function updateLineSelector() {
@@ -164,7 +144,7 @@ function updateLineSelector() {
         return `
             <div class="line-item">
                 <input type="checkbox" id="line-${index}" value="${line.name}" ${isChecked}
-                       onchange="toggleLine('${line.name}')">
+                       onchange="toggleLine('${line.name.replace(/'/g, "\\'")}')">
                 <label for="line-${index}" class="line-name">${line.name}</label>
                 <div class="line-color" style="background-color: ${color}"></div>
             </div>
@@ -193,6 +173,51 @@ function toggleLine(lineName) {
 }
 
 /**
+ * Calculate bounds for all selected stations
+ */
+function calculateBounds(lines) {
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+
+    lines.forEach(line => {
+        line.stations.forEach(station => {
+            minX = Math.min(minX, station.x);
+            minY = Math.min(minY, station.y);
+            maxX = Math.max(maxX, station.x);
+            maxY = Math.max(maxY, station.y);
+        });
+    });
+
+    // Add padding
+    const padding = 50;
+    minX -= padding;
+    minY -= padding;
+    maxX += padding;
+    maxY += padding;
+
+    return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Convert game coordinates to SVG coordinates
+ */
+function gameToSVG(gameX, gameY, bounds) {
+    const svgWidth = 1200;
+    const svgHeight = 800;
+
+    // Calculate scale to fit
+    const scaleX = svgWidth / (bounds.maxX - bounds.minX);
+    const scaleY = svgHeight / (bounds.maxY - bounds.minY);
+    scale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave margin
+
+    // Convert coordinates (flip Y axis for SVG)
+    const x = (gameX - bounds.minX) * scale;
+    const y = (bounds.maxY - gameY) * scale; // Flip Y
+
+    return { x, y };
+}
+
+/**
  * Render the railroad diagram
  */
 function renderDiagram() {
@@ -211,8 +236,22 @@ function renderDiagram() {
     // Filter selected lines
     const linesToRender = stationData.lines.filter(line => selectedLines.has(line.name));
 
-    // Calculate layout
-    const layout = calculateLayout(linesToRender);
+    if (linesToRender.length === 0) {
+        svg.innerHTML = `
+            <text x="400" y="300" text-anchor="middle" class="no-data-message">
+                路線を選択してください
+            </text>
+        `;
+        updateStats(0, 0, 0);
+        return;
+    }
+
+    // Calculate bounds
+    const bounds = calculateBounds(linesToRender);
+
+    // Update SVG viewBox
+    const svgElement = document.getElementById('railroad-diagram');
+    svgElement.setAttribute('viewBox', `0 0 1200 800`);
 
     // Render SVG
     let svgContent = '';
@@ -221,17 +260,27 @@ function renderDiagram() {
 
     linesToRender.forEach((line, lineIndex) => {
         const color = LINE_COLORS[lineIndex % LINE_COLORS.length];
-        const stations = layout.lines[line.name];
+        const stations = line.stations;
 
         if (!stations || stations.length === 0) return;
 
         totalStations += stations.length;
 
-        // Draw rail line
-        svgContent += renderRailLine(stations, color);
+        // Convert station coordinates
+        const svgStations = stations.map(station => {
+            const pos = gameToSVG(station.x, station.y, bounds);
+            return {
+                ...station,
+                svgX: pos.x,
+                svgY: pos.y
+            };
+        });
+
+        // Draw rail line connecting stations
+        svgContent += renderRailLine(svgStations, color);
 
         // Draw stations
-        stations.forEach(station => {
+        svgStations.forEach(station => {
             svgContent += renderStation(station, color);
         });
 
@@ -239,7 +288,7 @@ function renderDiagram() {
         if (trainData && trainData.trains) {
             const lineTrains = trainData.trains.filter(train => train.line === line.name);
             lineTrains.forEach(train => {
-                const trainSvg = renderTrain(train, stations, color);
+                const trainSvg = renderTrain(train, bounds, color);
                 if (trainSvg) {
                     visibleTrains++;
                     svgContent += trainSvg;
@@ -255,59 +304,13 @@ function renderDiagram() {
 }
 
 /**
- * Calculate layout for stations
- */
-function calculateLayout(lines) {
-    const layout = { lines: {} };
-    const margin = 50;
-    const lineSpacing = 150;
-    const stationSpacing = 100;
-
-    lines.forEach((line, lineIndex) => {
-        const y = margin + (lineIndex * lineSpacing);
-        const stations = line.stations || [];
-
-        layout.lines[line.name] = stations.map((station, stationIndex) => {
-            // Check for manual positioning
-            let x, stationY;
-
-            if (!displaySettings.autoLayout && lineConfig && lineConfig[line.name]) {
-                const manualPos = lineConfig[line.name][station.name];
-                if (manualPos) {
-                    x = manualPos.x;
-                    stationY = manualPos.y;
-                } else {
-                    x = margin + (stationIndex * stationSpacing);
-                    stationY = y;
-                }
-            } else {
-                // Auto layout
-                x = margin + (stationIndex * stationSpacing);
-                stationY = y;
-            }
-
-            return {
-                name: station.name,
-                x: x,
-                y: stationY,
-                gameX: station.x,
-                gameY: station.y,
-                gameZ: station.z
-            };
-        });
-    });
-
-    return layout;
-}
-
-/**
  * Render rail line (connecting lines between stations)
  */
 function renderRailLine(stations, color) {
     if (stations.length < 2) return '';
 
-    const points = stations.map(s => `${s.x},${s.y}`).join(' ');
-    return `<polyline points="${points}" class="rail-line" stroke="${color}" />`;
+    const points = stations.map(s => `${s.svgX},${s.svgY}`).join(' ');
+    return `<polyline points="${points}" class="rail-line" stroke="${color}" stroke-width="2" fill="none" />`;
 }
 
 /**
@@ -315,12 +318,14 @@ function renderRailLine(stations, color) {
  */
 function renderStation(station, color) {
     let svg = `
-        <circle cx="${station.x}" cy="${station.y}" r="6" class="station-circle" fill="${color}" />
+        <circle cx="${station.svgX}" cy="${station.svgY}" r="5" class="station-circle"
+                fill="${color}" stroke="#fff" stroke-width="2" />
     `;
 
     if (displaySettings.showStationNames) {
         svg += `
-            <text x="${station.x}" y="${station.y - 12}" class="station-name">
+            <text x="${station.svgX}" y="${station.svgY - 10}" class="station-name"
+                  text-anchor="middle" font-size="11" fill="#333">
                 ${station.name}
             </text>
         `;
@@ -330,34 +335,39 @@ function renderStation(station, color) {
 }
 
 /**
- * Render train on the line
+ * Render train at actual game position
  */
-function renderTrain(train, stations, color) {
-    if (!train.position || stations.length === 0) return '';
+function renderTrain(train, bounds, color) {
+    if (!train.position) return '';
 
-    // Find closest station to train position
-    const closestStation = findClosestStation(train.position, stations);
-    if (!closestStation) return '';
+    // Convert train position to SVG coordinates
+    const pos = gameToSVG(train.position.x, train.position.y, bounds);
 
-    const loadingClass = train.is_loading ? 'loading-train' : '';
     const trainColor = train.is_loading ? '#fbbf24' : '#ef4444';
+    const pulseClass = train.is_loading ? 'loading-train' : '';
 
     let svg = `
-        <g class="train-icon">
-            <circle cx="${closestStation.x}" cy="${closestStation.y}" r="8" fill="${trainColor}" class="${loadingClass}" />
+        <g class="train-icon ${pulseClass}">
+            <circle cx="${pos.x}" cy="${pos.y}" r="6" fill="${trainColor}"
+                    stroke="#fff" stroke-width="2" />
     `;
+
+    let labelY = pos.y + 20;
 
     if (displaySettings.showTrainNames) {
         svg += `
-            <text x="${closestStation.x}" y="${closestStation.y + 25}" class="train-label">
+            <text x="${pos.x}" y="${labelY}" class="train-label"
+                  text-anchor="middle" font-size="10" fill="#000" font-weight="bold">
                 ${train.name}
             </text>
         `;
+        labelY += 12;
     }
 
     if (displaySettings.showSpeeds) {
         svg += `
-            <text x="${closestStation.x}" y="${closestStation.y + 37}" class="speed-label">
+            <text x="${pos.x}" y="${labelY}" class="speed-label"
+                  text-anchor="middle" font-size="9" fill="#666">
                 ${train.speed_kmh} km/h
             </text>
         `;
@@ -366,29 +376,6 @@ function renderTrain(train, stations, color) {
     svg += '</g>';
 
     return svg;
-}
-
-/**
- * Find closest station to a train position
- */
-function findClosestStation(trainPos, stations) {
-    if (stations.length === 0) return null;
-
-    let closest = stations[0];
-    let minDistance = Infinity;
-
-    stations.forEach(station => {
-        const dx = trainPos.x - station.gameX;
-        const dy = trainPos.y - station.gameY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance < minDistance) {
-            minDistance = distance;
-            closest = station;
-        }
-    });
-
-    return closest;
 }
 
 /**
