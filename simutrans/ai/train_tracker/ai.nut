@@ -172,42 +172,52 @@ function export_train_data() {
 
 /**
  * Export station data for all rail/tram lines
- * Called once per year
+ * Extracts lines from all convoys in the world (all players)
  */
 function export_station_data() {
     try {
         local lines_data = []
+        local unique_lines = {}  // Track unique lines by name to avoid duplicates
 
-        // Get line list from AI player (not world)
-        if (!persistent.ai_player || !persistent.ai_player.is_valid()) {
-            debug_log("export_station_data: ai_player not valid")
-            local json_string = build_station_json(lines_data)
-            write_station_file(json_string)
-            return  // Player not available
+        // Get convoy list (same approach as export_train_data)
+        local convoy_list = world.get_convoy_list()
+        debug_log("export_station_data: found " + convoy_list.get_count() + " convoys")
+
+        // Convert convoy_list to array for generator
+        local convoy_array = []
+        for (local i = 0; i < convoy_list.get_count(); i++) {
+            convoy_array.append(convoy_list[i])
         }
 
-        local line_list = persistent.ai_player.get_line_list()
-        debug_log("export_station_data: found " + line_list.get_count() + " lines")
+        // First pass: collect unique lines from convoys
+        foreach (convoy in _step_generator(convoy_array)) {
+            if (!convoy.is_valid()) continue
 
-        // Convert line_list to array for generator
-        local line_array = []
-        for (local i = 0; i < line_list.get_count(); i++) {
-            line_array.append(line_list[i])
-        }
+            // Get waytype and filter
+            local wt = convoy.get_waytype()
+            if (!should_track_waytype(wt)) continue
 
-        local processed = 0
-        local filtered = 0
+            // Get line from convoy
+            local line = convoy.get_line()
+            if (!line || !line.is_valid()) continue
 
-        // Iterate through all lines with yield for timeout prevention
-        foreach (line in _step_generator(line_array)) {
-            if (!line.is_valid()) continue
-
-            // Filter: only track rail and tram lines
-            local wt = line.get_waytype()
-            if (!should_track_waytype(wt)) {
-                filtered++
-                continue
+            // Track unique lines by name
+            local line_name = line.get_name()
+            if (!(line_name in unique_lines)) {
+                unique_lines[line_name] <- {
+                    line = line,
+                    waytype = wt
+                }
             }
+        }
+
+        debug_log("export_station_data: found " + unique_lines.len() + " unique lines from convoys")
+
+        // Second pass: process each unique line to extract stations
+        local processed = 0
+        foreach (line_name, line_info in unique_lines) {
+            local line = line_info.line
+            local wt = line_info.waytype
 
             // Get line schedule
             local schedule = line.get_schedule()
@@ -215,12 +225,14 @@ function export_station_data() {
 
             local stations = []
 
-            // Use generator for schedule entries too
+            // Extract stations from schedule entries with yield
             foreach (entry in _step_generator(schedule.entries)) {
+                // Get halt position from entry
                 local pos = entry.get_halt(null)
 
                 if (pos) {
-                    local halt = halt_x.get_halt(world, pos)
+                    // Get halt object from position
+                    local halt = halt_x.get_halt(world, pos, null)
                     if (halt && halt.is_valid()) {
                         local station_data = {
                             name = halt.get_name(),
@@ -236,7 +248,7 @@ function export_station_data() {
             // Only add line if it has stations
             if (stations.len() > 0) {
                 local line_data = {
-                    name = line.get_name(),
+                    name = line_name,
                     waytype = get_waytype_en(wt),
                     waytype_ja = get_waytype_ja(wt),
                     stations = stations
@@ -246,7 +258,7 @@ function export_station_data() {
             }
         }
 
-        debug_log("export_station_data: processed=" + processed + " filtered=" + filtered + " total_lines=" + lines_data.len())
+        debug_log("export_station_data: processed=" + processed + " total_lines=" + lines_data.len())
 
         // Build JSON and write to file
         local json_string = build_station_json(lines_data)
