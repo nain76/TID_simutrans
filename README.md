@@ -22,9 +22,9 @@ Simutrans OTRPで走行中の列車の位置をWeb上でリアルタイムに確
 
 ```
 Simutrans (ゲーム)
-    ↓ Squirrel AIスクリプト
-    ├─ 列車データ (月1回) → train_positions.json
-    └─ 駅データ (年1回) → station_data.json
+    ↓ Squirrel AIスクリプト (交互実行)
+    ├─ 列車データ (奇数月) → train_positions.json
+    └─ 駅データ (偶数月) → station_data.json
            ↓ ファイル読み込み
 Python Flask Webサーバー
     ↓ HTTP/JSON API

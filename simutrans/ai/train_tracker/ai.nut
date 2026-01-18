@@ -66,18 +66,20 @@ function resume_game(pl_nr) {
 
 /**
  * Called every game month
- * Export train data once per month
+ * Alternates between train data (even months) and station data (odd months)
+ * to avoid resource conflicts
  */
 function new_month() {
-    export_train_data()
-}
+    local game_time = world.get_time()
+    local month = game_time.month  // 0-11 (0=January, 11=December)
 
-/**
- * Called every game year
- * Export station data once per year (manual trigger)
- */
-function new_year() {
-    export_station_data()
+    if (month % 2 == 0) {
+        // Even months (0,2,4,6,8,10): Export train data
+        export_train_data()
+    } else {
+        // Odd months (1,3,5,7,9,11): Export station data
+        export_station_data()
+    }
 }
 
 /**
