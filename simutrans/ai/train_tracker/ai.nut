@@ -221,7 +221,7 @@ function export_station_data() {
 
             // Get line schedule
             local schedule = line.get_schedule()
-            if (!schedule || !schedule.is_valid()) continue
+            if (!schedule) continue
 
             local stations = []
 
