@@ -294,9 +294,9 @@ function export_station_data() {
             })
         }
 
-        // Second pass: process each unique line to extract stations with yield
+        // Second pass: process each unique line to extract stations with yield after each line
         local processed = 0
-        foreach (line_obj in _step_generator(lines_array)) {
+        foreach (line_obj in lines_array) {
             local line_name = line_obj.name
             local line = line_obj.line
             local wt = line_obj.waytype
@@ -304,12 +304,15 @@ function export_station_data() {
 
             // Get line schedule
             local schedule = line.get_schedule()
-            if (!schedule) continue
+            if (!schedule) {
+                yield null  // YIELD POINT: Even if no schedule, yield to prevent timeout
+                continue
+            }
 
             local stations = []
 
-            // Extract stations from schedule entries with yield
-            foreach (entry in _step_generator(schedule.entries)) {
+            // Extract stations from schedule entries
+            foreach (entry in schedule.entries) {
                 // Get halt from tile at entry coordinates (all players)
                 local halt = tile_x(entry.x, entry.y, entry.z).get_halt()
 
@@ -336,6 +339,8 @@ function export_station_data() {
                 lines_data.append(line_data)
                 processed++
             }
+
+            yield null  // YIELD POINT: After processing each line
         }
 
         yield null  // YIELD POINT 1: After line processing
