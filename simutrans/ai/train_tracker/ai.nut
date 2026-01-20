@@ -126,9 +126,9 @@ function work() {
         total_hours += hours_in_month
     }
 
-    // Export every 12 game hours
-    if (total_hours - persistent.last_export_hours >= 12) {
-        debug_log("12 hours passed, exporting (total_hours=" + total_hours + ")")
+    // Export every 24 game hours (1 game day)
+    if (total_hours - persistent.last_export_hours >= 24) {
+        debug_log("24 hours passed, exporting (total_hours=" + total_hours + ")")
 
         // Execute export_train_data generator
         foreach (dummy in export_train_data()) {}
@@ -348,12 +348,16 @@ function export_station_data() {
         debug_log("export_station_data: processed=" + processed + " total_lines=" + lines_data.len())
 
         // Build JSON and write to file
+        debug_log("export_station_data: starting JSON build")
         local json_string = build_station_json(lines_data)
 
+        debug_log("export_station_data: JSON build complete, size=" + json_string.len())
         yield null  // YIELD POINT 2: After JSON building
 
+        debug_log("export_station_data: starting file write")
         write_station_file(json_string)
 
+        debug_log("export_station_data: file write complete")
         yield null  // YIELD POINT 3: After file writing
 
     } catch (e) {
