@@ -8,10 +8,10 @@
  * 1. Start or load a game
  * 2. Add a new AI player
  * 3. Select "train_tracker" as the AI script
- * 4. The AI will automatically export train data every in-game day
+ * 4. The AI will automatically export train data every 3 in-game days
  *
  * Author: Claude Code
- * Version: 1.1
+ * Version: 1.0
  */
 
 // Include utility scripts
@@ -35,10 +35,10 @@ function _step_generator(iteratable) {
  */
 function debug_log(message) {
     try {
-        local f = file("train_tracker_debug.log", "a")
+        local f = file("station_export_debug.log", "a")
         if (f) {
             local game_time = world.get_time()
-            f.writestr("[" + game_time.year + "-" + (game_time.month + 1) + "-" + get_current_day() + "] " + message + "\n")
+            f.writestr("[" + game_time.year + "-" + (game_time.month + 1) + "] " + message + "\n")
             f.close()
         }
     } catch (e) {
@@ -54,7 +54,9 @@ config <- {
     // Ticks per month (default Simutrans setting)
     ticks_per_month = 1048576,
     // Days per month (Simutrans default)
-    days_per_month = 30
+    days_per_month = 30,
+    // Export interval in days
+    export_interval_days = 3
 }
 
 // Persistent data (survives save/load)
@@ -84,18 +86,6 @@ function get_total_days() {
 }
 
 /**
- * Get current day within month (1-30)
- * @return Current day of month
- */
-function get_current_day() {
-    local game_time = world.get_time()
-    local ticks_per_day = config.ticks_per_month / config.days_per_month
-    local day = (game_time.ticks / ticks_per_day) + 1
-    if (day > config.days_per_month) day = config.days_per_month
-    return day
-}
-
-/**
  * AI initialization
  * Called when AI is first started
  * @param pl_nr Player number (integer)
@@ -103,7 +93,6 @@ function get_current_day() {
 function start(pl_nr) {
     // Convert player number to player object
     persistent.ai_player = player_x(pl_nr)
-    debug_log("AI started")
 }
 
 /**
@@ -113,7 +102,6 @@ function start(pl_nr) {
 function resume_game(pl_nr) {
     // Convert player number to player object
     persistent.ai_player = player_x(pl_nr)
-    debug_log("AI resumed from save")
 }
 
 /**
@@ -135,9 +123,7 @@ function work() {
     local current_day = get_total_days()
 
     // Check if 3 days have passed since last export (or never exported)
-    if (persistent.last_export_day == -1 || current_day - persistent.last_export_day >= 3) {
-        debug_log("New day detected (day=" + current_day + "), starting export")
-
+    if (persistent.last_export_day == -1 || current_day - persistent.last_export_day >= config.export_interval_days) {
         // Execute export_train_data generator
         foreach (dummy in export_train_data()) {}
 
@@ -147,7 +133,6 @@ function work() {
         foreach (dummy in export_station_data()) {}
 
         persistent.last_export_day = current_day
-        debug_log("Export complete (count=" + persistent.export_count + ")")
     }
 
     yield null  // Always yield to prevent blocking
@@ -155,10 +140,10 @@ function work() {
 
 /**
  * Main export function - collects train data and writes JSON
+ * Generator function to handle yields properly
  */
 function export_train_data() {
     try {
-        debug_log("export_train_data: starting")
         local trains = []
         local convoy_list = world.get_convoy_list()
 
@@ -216,32 +201,28 @@ function export_train_data() {
 
         yield null  // YIELD POINT: After convoy processing
 
-        debug_log("export_train_data: collected " + trains.len() + " trains")
-
         // Build JSON
         local game_time = world.get_time()
         local json_string = build_train_json(trains, game_time)
-
-        debug_log("export_train_data: JSON built, size=" + json_string.len())
 
         yield null  // YIELD POINT: After JSON building
 
         // Write to file
         write_json_file(json_string)
-        debug_log("export_train_data: file written")
 
         yield null  // YIELD POINT: After file writing
 
         persistent.export_count++
 
     } catch (e) {
-        debug_log("export_train_data: ERROR - " + e)
+        // Silent error handling to save time
     }
 }
 
 /**
  * Export station data for all rail/tram lines
  * Extracts lines from all convoys in the world (all players)
+ * Generator function to handle yields properly
  */
 function export_station_data() {
     try {
