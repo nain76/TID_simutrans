@@ -128,14 +128,14 @@ function step() {
 
 /**
  * Main work function - called periodically by step()
- * Exports data every in-game day
+ * Exports data every 3 in-game days
  * Generator function to handle yields properly
  */
 function work() {
     local current_day = get_total_days()
 
-    // Check if a day has passed since last export
-    if (current_day > persistent.last_export_day) {
+    // Check if 3 days have passed since last export (or never exported)
+    if (persistent.last_export_day == -1 || current_day - persistent.last_export_day >= 3) {
         debug_log("New day detected (day=" + current_day + "), starting export")
 
         // Execute export_train_data generator
@@ -334,6 +334,8 @@ function export_station_data() {
                 lines_data.append(line_data)
                 processed++
             }
+
+            yield null  // YIELD POINT: After each line processed
         }
 
         debug_log("export_station_data: processed=" + processed + " total_lines=" + lines_data.len())
