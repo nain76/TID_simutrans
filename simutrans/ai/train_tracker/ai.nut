@@ -186,6 +186,14 @@ function export_train_data() {
                 train_data.line <- "無所属"
             }
 
+            // Get owner/company information
+            local owner = convoy.get_owner()
+            if (owner && owner.is_valid()) {
+                train_data.company <- owner.get_name()
+            } else {
+                train_data.company <- "Unknown"
+            }
+
             // Skip schedule information to avoid timeout
             train_data.current_halt <- null
             train_data.next_halt <- null
@@ -293,10 +301,18 @@ function export_station_data() {
 
             // Only add line if it has stations
             if (stations.len() > 0) {
+                // Get owner/company information from line
+                local owner = line.get_owner()
+                local company_name = "Unknown"
+                if (owner && owner.is_valid()) {
+                    company_name = owner.get_name()
+                }
+
                 local line_data = {
                     name = line_name,
                     waytype = get_waytype_en(wt),
                     waytype_ja = get_waytype_ja(wt),
+                    company = company_name,
                     stations = stations
                 }
                 lines_data.append(line_data)
