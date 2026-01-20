@@ -124,14 +124,9 @@ function work() {
 
     // Check if 3 days have passed since last export (or never exported)
     if (persistent.last_export_day == -1 || current_day - persistent.last_export_day >= config.export_interval_days) {
-        // Execute export_train_data generator
-        foreach (dummy in export_train_data()) {}
-
-        yield null  // YIELD POINT: Between exports
-
-        // Execute export_station_data generator
-        foreach (dummy in export_station_data()) {}
-
+        // Call export functions (they handle their own yields internally via _step_generator)
+        export_train_data()
+        export_station_data()
         persistent.last_export_day = current_day
     }
 
@@ -140,7 +135,6 @@ function work() {
 
 /**
  * Main export function - collects train data and writes JSON
- * Generator function to handle yields properly
  */
 function export_train_data() {
     try {
@@ -199,20 +193,16 @@ function export_train_data() {
             trains.append(train_data)
         }
 
-        yield null  // YIELD POINT: After convoy processing
-
         // Build JSON
         local game_time = world.get_time()
         local json_string = build_train_json(trains, game_time)
 
-        yield null  // YIELD POINT: After JSON building
-
         // Write to file
         write_json_file(json_string)
 
-        yield null  // YIELD POINT: After file writing
-
         persistent.export_count++
+
+        // No debug print to save time
 
     } catch (e) {
         // Silent error handling to save time
@@ -222,7 +212,6 @@ function export_train_data() {
 /**
  * Export station data for all rail/tram lines
  * Extracts lines from all convoys in the world (all players)
- * Generator function to handle yields properly
  */
 function export_station_data() {
     try {
@@ -262,8 +251,6 @@ function export_station_data() {
         }
 
         debug_log("export_station_data: found " + unique_lines.len() + " unique lines from convoys")
-
-        yield null  // YIELD POINT: After collecting unique lines
 
         // Convert unique_lines table to array for generator
         local lines_array = []
@@ -315,24 +302,16 @@ function export_station_data() {
                 lines_data.append(line_data)
                 processed++
             }
-
-            yield null  // YIELD POINT: After each line processed
         }
 
         debug_log("export_station_data: processed=" + processed + " total_lines=" + lines_data.len())
-
-        yield null  // YIELD POINT: After line processing
 
         // Build JSON and write to file
         local json_string = build_station_json(lines_data)
         debug_log("export_station_data: JSON built, size=" + json_string.len())
 
-        yield null  // YIELD POINT: After JSON building
-
         write_station_file(json_string)
         debug_log("export_station_data: file written")
-
-        yield null  // YIELD POINT: After file writing
 
     } catch (e) {
         debug_log("Error in export_station_data: " + e)
