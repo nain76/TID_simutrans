@@ -147,6 +147,7 @@ function work() {
  */
 function export_train_data() {
     try {
+        debug_log("export_train_data: starting")
         local trains = []
         local convoy_list = world.get_convoy_list()
 
@@ -212,23 +213,50 @@ function export_train_data() {
 
         yield null  // YIELD POINT 1: After convoy processing
 
-        // Build JSON
-        local game_time = world.get_time()
-        local json_string = build_train_json(trains, game_time)
+        debug_log("export_train_data: collected " + trains.len() + " trains")
 
-        yield null  // YIELD POINT 2: After JSON building
+        // Build JSON incrementally with batching
+        local batch_size = 50
+        local game_time = world.get_time()
+
+        // Build header
+        local json = "{\"timestamp\":\"" + format_timestamp() + "\","
+        json += "\"game_time\":{\"year\":" + game_time.year
+        json += ",\"month\":" + game_time.month
+        json += ",\"ticks\":" + game_time.ticks + "},"
+        json += "\"trains\":["
+
+        debug_log("export_train_data: building JSON for " + trains.len() + " trains")
+
+        // Process trains in batches
+        for (local i = 0; i < trains.len(); i++) {
+            if (i > 0) json += ","
+            json += to_json(trains[i])  // Single train is OK
+
+            // Yield every 50 trains
+            if ((i + 1) % batch_size == 0) {
+                debug_log("export_train_data: processed " + (i + 1) + "/" + trains.len())
+                yield null
+            }
+        }
+
+        // Build footer
+        json += "]}"
+
+        debug_log("export_train_data: JSON complete, size=" + json.len())
+        yield null  // YIELD POINT: After JSON building
 
         // Write to file
-        write_json_file(json_string)
+        debug_log("export_train_data: starting file write")
+        write_json_file(json)
+        debug_log("export_train_data: file write complete")
 
         yield null  // YIELD POINT 3: After file writing
 
         persistent.export_count++
 
-        // No debug print to save time
-
     } catch (e) {
-        // Silent error handling to save time
+        debug_log("export_train_data: ERROR - " + e)
     }
 }
 
@@ -347,15 +375,39 @@ function export_station_data() {
 
         debug_log("export_station_data: processed=" + processed + " total_lines=" + lines_data.len())
 
-        // Build JSON and write to file
-        debug_log("export_station_data: starting JSON build")
-        local json_string = build_station_json(lines_data)
+        // Build JSON incrementally with batching
+        local batch_size = 20
+        local game_time = world.get_time()
 
-        debug_log("export_station_data: JSON build complete, size=" + json_string.len())
-        yield null  // YIELD POINT 2: After JSON building
+        // Build header
+        local json = "{\"timestamp\":\"" + format_timestamp() + "\","
+        json += "\"game_time\":{\"year\":" + game_time.year
+        json += ",\"month\":" + game_time.month
+        json += ",\"ticks\":" + game_time.ticks + "},"
+        json += "\"lines\":["
+
+        debug_log("export_station_data: building JSON for " + lines_data.len() + " lines")
+
+        // Process lines in batches
+        for (local i = 0; i < lines_data.len(); i++) {
+            if (i > 0) json += ","
+            json += to_json(lines_data[i])  // Single line is OK
+
+            // Yield every 20 lines
+            if ((i + 1) % batch_size == 0) {
+                debug_log("export_station_data: processed " + (i + 1) + "/" + lines_data.len())
+                yield null
+            }
+        }
+
+        // Build footer
+        json += "]}"
+
+        debug_log("export_station_data: JSON complete, size=" + json.len())
+        yield null  // YIELD POINT: After JSON building
 
         debug_log("export_station_data: starting file write")
-        write_station_file(json_string)
+        write_station_file(json)
 
         debug_log("export_station_data: file write complete")
         yield null  // YIELD POINT 3: After file writing
