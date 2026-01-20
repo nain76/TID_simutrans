@@ -56,7 +56,7 @@ config <- {
     // Days per month (Simutrans default)
     days_per_month = 30,
     // Export interval in days
-    export_interval_days = 3
+    export_interval_days = 2
 }
 
 // Persistent data (survives save/load)
