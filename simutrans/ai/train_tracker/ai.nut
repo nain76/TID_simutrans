@@ -58,7 +58,8 @@ persistent <- {
     last_export_ticks = 0,
     export_count = 0,
     ai_player = null,  // Store AI player reference
-    initial_export_done = false  // Track if initial export completed
+    initial_export_done = false,  // Track if initial export completed
+    last_export_hours = 0  // Track last export time in game hours
 }
 
 /**
@@ -95,6 +96,34 @@ function new_month() {
 }
 
 /**
+ * Called periodically by AI system
+ * Exports data every 12 game hours
+ */
+function work() {
+    local game_time = world.get_time()
+
+    // Calculate total game hours
+    // Approximation: 18.2 hours per month (default game speed)
+    local hours_per_month = 18
+    local total_hours = (game_time.year * 12 + game_time.month) * hours_per_month
+
+    // Add hours within current month based on ticks
+    // Assuming ~1048576 ticks per month, ~57755 ticks per hour
+    if (game_time.ticks > 0) {
+        local hours_in_month = game_time.ticks / 57755
+        total_hours += hours_in_month
+    }
+
+    // Export every 12 game hours
+    if (total_hours - persistent.last_export_hours >= 12) {
+        debug_log("12 hours passed, exporting (total_hours=" + total_hours + ")")
+        export_train_data()
+        export_station_data()
+        persistent.last_export_hours = total_hours
+    }
+}
+
+/**
  * Main export function - collects train data and writes JSON
  */
 function export_train_data() {
@@ -121,10 +150,18 @@ function export_train_data() {
             // Filter: only track rail and tram
             if (!should_track_waytype(wt)) continue
 
+            // Get owner information
+            local owner = convoy.get_owner()
+            local owner_name = "Unknown"
+            if (owner && owner.is_valid()) {
+                owner_name = owner.get_name()
+            }
+
             // Build train data
             local train_data = {
                 id = i,
                 name = convoy.get_name(),
+                owner = owner_name,
                 waytype = get_waytype_en(wt),
                 waytype_ja = get_waytype_ja(wt),
                 speed_kmh = convoy.get_speed(),
@@ -204,9 +241,17 @@ function export_station_data() {
             // Track unique lines by name
             local line_name = line.get_name()
             if (!(line_name in unique_lines)) {
+                // Get line owner
+                local owner = line.get_owner()
+                local owner_name = "Unknown"
+                if (owner && owner.is_valid()) {
+                    owner_name = owner.get_name()
+                }
+
                 unique_lines[line_name] <- {
                     line = line,
-                    waytype = wt
+                    waytype = wt,
+                    owner = owner_name
                 }
             }
         }
@@ -219,7 +264,8 @@ function export_station_data() {
             lines_array.append({
                 name = line_name,
                 line = line_info.line,
-                waytype = line_info.waytype
+                waytype = line_info.waytype,
+                owner = line_info.owner
             })
         }
 
@@ -229,6 +275,7 @@ function export_station_data() {
             local line_name = line_obj.name
             local line = line_obj.line
             local wt = line_obj.waytype
+            local owner_name = line_obj.owner
 
             // Get line schedule
             local schedule = line.get_schedule()
@@ -256,6 +303,7 @@ function export_station_data() {
             if (stations.len() > 0) {
                 local line_data = {
                     name = line_name,
+                    owner = owner_name,
                     waytype = get_waytype_en(wt),
                     waytype_ja = get_waytype_ja(wt),
                     stations = stations
