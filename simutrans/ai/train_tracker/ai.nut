@@ -8,10 +8,10 @@
  * 1. Start or load a game
  * 2. Add a new AI player
  * 3. Select "train_tracker" as the AI script
- * 4. The AI will automatically export train data every ~30 seconds
+ * 4. The AI will automatically export train data every in-game day
  *
  * Author: Claude Code
- * Version: 1.0
+ * Version: 1.1
  */
 
 // Include utility scripts
@@ -35,10 +35,10 @@ function _step_generator(iteratable) {
  */
 function debug_log(message) {
     try {
-        local f = file("station_export_debug.log", "a")
+        local f = file("train_tracker_debug.log", "a")
         if (f) {
             local game_time = world.get_time()
-            f.writestr("[" + game_time.year + "-" + (game_time.month + 1) + "] " + message + "\n")
+            f.writestr("[" + game_time.year + "-" + (game_time.month + 1) + "-" + get_current_day() + "] " + message + "\n")
             f.close()
         }
     } catch (e) {
@@ -50,16 +50,49 @@ function debug_log(message) {
 config <- {
     // Output file path (relative to simutrans directory)
     output_file = "train_positions.json",
-    station_file = "station_data.json"
+    station_file = "station_data.json",
+    // Ticks per month (default Simutrans setting)
+    ticks_per_month = 1048576,
+    // Days per month (Simutrans default)
+    days_per_month = 30
 }
 
 // Persistent data (survives save/load)
 persistent <- {
-    last_export_ticks = 0,
+    last_export_day = -1,  // Track last export day (-1 means never exported)
     export_count = 0,
-    ai_player = null,  // Store AI player reference
-    initial_export_done = false,  // Track if initial export completed
-    last_export_hours = 0  // Track last export time in game hours
+    ai_player = null  // Store AI player reference
+}
+
+/**
+ * Calculate current day number (total days since game start)
+ * @return Total days elapsed in game
+ */
+function get_total_days() {
+    local game_time = world.get_time()
+
+    // Calculate total days from years and months
+    local total_days = game_time.year * 12 * config.days_per_month
+    total_days += game_time.month * config.days_per_month
+
+    // Add days within current month based on ticks
+    local ticks_per_day = config.ticks_per_month / config.days_per_month
+    local current_day_in_month = game_time.ticks / ticks_per_day
+    total_days += current_day_in_month
+
+    return total_days
+}
+
+/**
+ * Get current day within month (1-30)
+ * @return Current day of month
+ */
+function get_current_day() {
+    local game_time = world.get_time()
+    local ticks_per_day = config.ticks_per_month / config.days_per_month
+    local day = (game_time.ticks / ticks_per_day) + 1
+    if (day > config.days_per_month) day = config.days_per_month
+    return day
 }
 
 /**
@@ -70,7 +103,7 @@ persistent <- {
 function start(pl_nr) {
     // Convert player number to player object
     persistent.ai_player = player_x(pl_nr)
-    // Export will happen at next month
+    debug_log("AI started")
 }
 
 /**
@@ -80,20 +113,7 @@ function start(pl_nr) {
 function resume_game(pl_nr) {
     // Convert player number to player object
     persistent.ai_player = player_x(pl_nr)
-    // No output to save time - export will happen at next month
-}
-
-/**
- * Called every game month
- * Exports both train and station data every month
- * Uses yield to prevent timeout with large datasets
- */
-function new_month() {
-    // Export both files every month
-    // Yield mechanism prevents timeout issues
-    foreach (dummy in export_train_data()) {}
-    yield null
-    foreach (dummy in export_station_data()) {}
+    debug_log("AI resumed from save")
 }
 
 /**
@@ -107,28 +127,16 @@ function step() {
 }
 
 /**
- * Called periodically by step() function
- * Exports data every 12 game hours
+ * Main work function - called periodically by step()
+ * Exports data every in-game day
  * Generator function to handle yields properly
  */
 function work() {
-    local game_time = world.get_time()
+    local current_day = get_total_days()
 
-    // Calculate total game hours
-    // Approximation: 18.2 hours per month (default game speed)
-    local hours_per_month = 18
-    local total_hours = (game_time.year * 12 + game_time.month) * hours_per_month
-
-    // Add hours within current month based on ticks
-    // Assuming ~1048576 ticks per month, ~57755 ticks per hour
-    if (game_time.ticks > 0) {
-        local hours_in_month = game_time.ticks / 57755
-        total_hours += hours_in_month
-    }
-
-    // Export every 24 game hours (1 game day)
-    if (total_hours - persistent.last_export_hours >= 24) {
-        debug_log("24 hours passed, exporting (total_hours=" + total_hours + ")")
+    // Check if a day has passed since last export
+    if (current_day > persistent.last_export_day) {
+        debug_log("New day detected (day=" + current_day + "), starting export")
 
         // Execute export_train_data generator
         foreach (dummy in export_train_data()) {}
@@ -138,8 +146,11 @@ function work() {
         // Execute export_station_data generator
         foreach (dummy in export_station_data()) {}
 
-        persistent.last_export_hours = total_hours
+        persistent.last_export_day = current_day
+        debug_log("Export complete (count=" + persistent.export_count + ")")
     }
+
+    yield null  // Always yield to prevent blocking
 }
 
 /**
@@ -170,18 +181,10 @@ function export_train_data() {
             // Filter: only track rail and tram
             if (!should_track_waytype(wt)) continue
 
-            // Get owner information
-            local owner = convoy.get_owner()
-            local owner_name = "Unknown"
-            if (owner && owner.is_valid()) {
-                owner_name = owner.get_name()
-            }
-
             // Build train data
             local train_data = {
                 id = i,
                 name = convoy.get_name(),
-                owner = owner_name,
                 waytype = get_waytype_en(wt),
                 waytype_ja = get_waytype_ja(wt),
                 speed_kmh = convoy.get_speed(),
@@ -211,47 +214,23 @@ function export_train_data() {
             trains.append(train_data)
         }
 
-        yield null  // YIELD POINT 1: After convoy processing
+        yield null  // YIELD POINT: After convoy processing
 
         debug_log("export_train_data: collected " + trains.len() + " trains")
 
-        // Build JSON incrementally with batching
-        local batch_size = 50
+        // Build JSON
         local game_time = world.get_time()
+        local json_string = build_train_json(trains, game_time)
 
-        // Build header
-        local json = "{\"timestamp\":\"" + format_timestamp() + "\","
-        json += "\"game_time\":{\"year\":" + game_time.year
-        json += ",\"month\":" + game_time.month
-        json += ",\"ticks\":" + game_time.ticks + "},"
-        json += "\"trains\":["
+        debug_log("export_train_data: JSON built, size=" + json_string.len())
 
-        debug_log("export_train_data: building JSON for " + trains.len() + " trains")
-
-        // Process trains in batches
-        for (local i = 0; i < trains.len(); i++) {
-            if (i > 0) json += ","
-            json += to_json(trains[i])  // Single train is OK
-
-            // Yield every 50 trains
-            if ((i + 1) % batch_size == 0) {
-                debug_log("export_train_data: processed " + (i + 1) + "/" + trains.len())
-                yield null
-            }
-        }
-
-        // Build footer
-        json += "]}"
-
-        debug_log("export_train_data: JSON complete, size=" + json.len())
         yield null  // YIELD POINT: After JSON building
 
         // Write to file
-        debug_log("export_train_data: starting file write")
-        write_json_file(json)
-        debug_log("export_train_data: file write complete")
+        write_json_file(json_string)
+        debug_log("export_train_data: file written")
 
-        yield null  // YIELD POINT 3: After file writing
+        yield null  // YIELD POINT: After file writing
 
         persistent.export_count++
 
@@ -294,22 +273,16 @@ function export_station_data() {
             // Track unique lines by name
             local line_name = line.get_name()
             if (!(line_name in unique_lines)) {
-                // Get line owner
-                local owner = line.get_owner()
-                local owner_name = "Unknown"
-                if (owner && owner.is_valid()) {
-                    owner_name = owner.get_name()
-                }
-
                 unique_lines[line_name] <- {
                     line = line,
-                    waytype = wt,
-                    owner = owner_name
+                    waytype = wt
                 }
             }
         }
 
         debug_log("export_station_data: found " + unique_lines.len() + " unique lines from convoys")
+
+        yield null  // YIELD POINT: After collecting unique lines
 
         // Convert unique_lines table to array for generator
         local lines_array = []
@@ -317,30 +290,25 @@ function export_station_data() {
             lines_array.append({
                 name = line_name,
                 line = line_info.line,
-                waytype = line_info.waytype,
-                owner = line_info.owner
+                waytype = line_info.waytype
             })
         }
 
-        // Second pass: process each unique line to extract stations with yield after each line
+        // Second pass: process each unique line to extract stations with yield
         local processed = 0
-        foreach (line_obj in lines_array) {
+        foreach (line_obj in _step_generator(lines_array)) {
             local line_name = line_obj.name
             local line = line_obj.line
             local wt = line_obj.waytype
-            local owner_name = line_obj.owner
 
             // Get line schedule
             local schedule = line.get_schedule()
-            if (!schedule) {
-                yield null  // YIELD POINT: Even if no schedule, yield to prevent timeout
-                continue
-            }
+            if (!schedule) continue
 
             local stations = []
 
-            // Extract stations from schedule entries
-            foreach (entry in schedule.entries) {
+            // Extract stations from schedule entries with yield
+            foreach (entry in _step_generator(schedule.entries)) {
                 // Get halt from tile at entry coordinates (all players)
                 local halt = tile_x(entry.x, entry.y, entry.z).get_halt()
 
@@ -359,7 +327,6 @@ function export_station_data() {
             if (stations.len() > 0) {
                 local line_data = {
                     name = line_name,
-                    owner = owner_name,
                     waytype = get_waytype_en(wt),
                     waytype_ja = get_waytype_ja(wt),
                     stations = stations
@@ -367,50 +334,22 @@ function export_station_data() {
                 lines_data.append(line_data)
                 processed++
             }
-
-            yield null  // YIELD POINT: After processing each line
         }
-
-        yield null  // YIELD POINT 1: After line processing
 
         debug_log("export_station_data: processed=" + processed + " total_lines=" + lines_data.len())
 
-        // Build JSON incrementally with batching
-        local batch_size = 20
-        local game_time = world.get_time()
+        yield null  // YIELD POINT: After line processing
 
-        // Build header
-        local json = "{\"timestamp\":\"" + format_timestamp() + "\","
-        json += "\"game_time\":{\"year\":" + game_time.year
-        json += ",\"month\":" + game_time.month
-        json += ",\"ticks\":" + game_time.ticks + "},"
-        json += "\"lines\":["
+        // Build JSON and write to file
+        local json_string = build_station_json(lines_data)
+        debug_log("export_station_data: JSON built, size=" + json_string.len())
 
-        debug_log("export_station_data: building JSON for " + lines_data.len() + " lines")
-
-        // Process lines in batches
-        for (local i = 0; i < lines_data.len(); i++) {
-            if (i > 0) json += ","
-            json += to_json(lines_data[i])  // Single line is OK
-
-            // Yield every 20 lines
-            if ((i + 1) % batch_size == 0) {
-                debug_log("export_station_data: processed " + (i + 1) + "/" + lines_data.len())
-                yield null
-            }
-        }
-
-        // Build footer
-        json += "]}"
-
-        debug_log("export_station_data: JSON complete, size=" + json.len())
         yield null  // YIELD POINT: After JSON building
 
-        debug_log("export_station_data: starting file write")
-        write_station_file(json)
+        write_station_file(json_string)
+        debug_log("export_station_data: file written")
 
-        debug_log("export_station_data: file write complete")
-        yield null  // YIELD POINT 3: After file writing
+        yield null  // YIELD POINT: After file writing
 
     } catch (e) {
         debug_log("Error in export_station_data: " + e)
@@ -447,9 +386,7 @@ function write_station_file(json_string) {
  */
 function save() {
     return "persistent <- { " +
-           "last_export_ticks = " + persistent.last_export_ticks + ", " +
+           "last_export_day = " + persistent.last_export_day + ", " +
            "export_count = " + persistent.export_count + ", " +
-           "ai_player = null, " +
-           "initial_export_done = " + (persistent.initial_export_done ? "true" : "false") + ", " +
-           "last_export_hours = " + persistent.last_export_hours + " }"
+           "ai_player = null }"
 }
