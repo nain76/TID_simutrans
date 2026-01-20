@@ -91,13 +91,25 @@ function resume_game(pl_nr) {
 function new_month() {
     // Export both files every month
     // Yield mechanism prevents timeout issues
-    export_train_data()
-    export_station_data()
+    foreach (dummy in export_train_data()) {}
+    yield null
+    foreach (dummy in export_station_data()) {}
 }
 
 /**
- * Called periodically by AI system
+ * Called regularly by Simutrans AI framework
+ * This is the main entry point that enables periodic updates
+ */
+function step() {
+    // Iterate through work() generator to execute it
+    // The foreach loop resumes the generator and handles yields
+    foreach (dummy in work()) {}
+}
+
+/**
+ * Called periodically by step() function
  * Exports data every 12 game hours
+ * Generator function to handle yields properly
  */
 function work() {
     local game_time = world.get_time()
@@ -117,8 +129,15 @@ function work() {
     // Export every 12 game hours
     if (total_hours - persistent.last_export_hours >= 12) {
         debug_log("12 hours passed, exporting (total_hours=" + total_hours + ")")
-        export_train_data()
-        export_station_data()
+
+        // Execute export_train_data generator
+        foreach (dummy in export_train_data()) {}
+
+        yield null  // YIELD POINT: Between exports
+
+        // Execute export_station_data generator
+        foreach (dummy in export_station_data()) {}
+
         persistent.last_export_hours = total_hours
     }
 }
@@ -191,12 +210,18 @@ function export_train_data() {
             trains.append(train_data)
         }
 
+        yield null  // YIELD POINT 1: After convoy processing
+
         // Build JSON
         local game_time = world.get_time()
         local json_string = build_train_json(trains, game_time)
 
+        yield null  // YIELD POINT 2: After JSON building
+
         // Write to file
         write_json_file(json_string)
+
+        yield null  // YIELD POINT 3: After file writing
 
         persistent.export_count++
 
@@ -313,11 +338,18 @@ function export_station_data() {
             }
         }
 
+        yield null  // YIELD POINT 1: After line processing
+
         debug_log("export_station_data: processed=" + processed + " total_lines=" + lines_data.len())
 
         // Build JSON and write to file
         local json_string = build_station_json(lines_data)
+
+        yield null  // YIELD POINT 2: After JSON building
+
         write_station_file(json_string)
+
+        yield null  // YIELD POINT 3: After file writing
 
     } catch (e) {
         debug_log("Error in export_station_data: " + e)
@@ -357,5 +389,6 @@ function save() {
            "last_export_ticks = " + persistent.last_export_ticks + ", " +
            "export_count = " + persistent.export_count + ", " +
            "ai_player = null, " +
-           "initial_export_done = " + (persistent.initial_export_done ? "true" : "false") + " }"
+           "initial_export_done = " + (persistent.initial_export_done ? "true" : "false") + ", " +
+           "last_export_hours = " + persistent.last_export_hours + " }"
 }
