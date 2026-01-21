@@ -704,8 +704,9 @@ function renderDiagram() {
                     if (s1.name === s2.name) continue;
 
                     // Create a normalized segment key (sort station names to avoid duplicates)
+                    // Use only station names for key so all routes sharing this track use the same waypoints
                     const segmentNames = [s1.name, s2.name].sort();
-                    const normalizedKey = `${group.name}:${segmentNames[0]}|${segmentNames[1]}`;
+                    const normalizedKey = `${segmentNames[0]}|${segmentNames[1]}`;
 
                     if (!groupSegments.has(normalizedKey)) {
                         groupSegments.set(normalizedKey, {
@@ -805,8 +806,9 @@ function renderDiagram() {
             }
 
             // Use station names in segment key for consistency (sorted for normalization)
+            // Use only station names for key so all routes sharing this track use the same waypoints
             const segmentNames = [s1.name, s2.name].sort();
-            const segmentKey = `${line.name}:${segmentNames[0]}|${segmentNames[1]}`;
+            const segmentKey = `${segmentNames[0]}|${segmentNames[1]}`;
             uniqueSegments.set(segmentKey, {
                 s1: s1,
                 s2: s2,
@@ -1248,8 +1250,38 @@ function loadWaypoints() {
         const saved = localStorage.getItem('segmentWaypoints');
         if (saved) {
             const parsed = JSON.parse(saved);
-            segmentWaypoints = new Map(parsed.map(item => [item.key, item.waypoints]));
+            segmentWaypoints = new Map();
+
+            // Migrate old format keys to new format
+            parsed.forEach(item => {
+                let key = item.key;
+
+                // Check if it's old format with prefix (prefix:stationA|stationB)
+                const colonIndex = key.indexOf(':');
+                if (colonIndex !== -1) {
+                    // Extract just the station part
+                    key = key.substring(colonIndex + 1);
+                    console.log('[Diagram] Migrated old key format to:', key);
+                }
+
+                // Merge waypoints if key already exists
+                if (segmentWaypoints.has(key)) {
+                    const existing = segmentWaypoints.get(key);
+                    // Append non-duplicate waypoints
+                    item.waypoints.forEach(wp => {
+                        if (!existing.some(e => e.t === wp.t && e.offset === wp.offset)) {
+                            existing.push(wp);
+                        }
+                    });
+                } else {
+                    segmentWaypoints.set(key, item.waypoints);
+                }
+            });
+
             console.log('[Diagram] Waypoints loaded from localStorage:', segmentWaypoints.size);
+
+            // Save with new format
+            saveWaypoints();
         } else {
             segmentWaypoints = new Map();
         }
@@ -1369,7 +1401,27 @@ function loadProfile(profileName) {
             lines: new Set(group.lines)
         }));
 
-        segmentWaypoints = new Map((profile.segmentWaypoints || []).map(item => [item.key, item.waypoints]));
+        // Load waypoints and migrate old format keys
+        segmentWaypoints = new Map();
+        (profile.segmentWaypoints || []).forEach(item => {
+            let key = item.key;
+            // Convert old format key if needed
+            const colonIndex = key.indexOf(':');
+            if (colonIndex !== -1) {
+                key = key.substring(colonIndex + 1);
+            }
+            // Merge waypoints if key already exists
+            if (segmentWaypoints.has(key)) {
+                const existing = segmentWaypoints.get(key);
+                item.waypoints.forEach(wp => {
+                    if (!existing.some(e => e.t === wp.t && e.offset === wp.offset)) {
+                        existing.push(wp);
+                    }
+                });
+            } else {
+                segmentWaypoints.set(key, item.waypoints);
+            }
+        });
 
         // Update UI
         document.getElementById('show-tracks').checked = displaySettings.showTracks;
@@ -1750,22 +1802,23 @@ function handleWaypointDrag(e) {
  */
 function getSegmentData(segmentKey, linesToRender, stationMidpoints, bounds) {
     // Parse segment key to find the segment
-    // Group segments: "groupName:stationA-stationB"
-    // Ungrouped segments: "lineName:stationA-stationB"
+    // New format: "stationA|stationB" (just station names, no prefix)
+    // Old format (for backward compatibility): "prefix:stationA|stationB"
 
-    // Check if it's a group segment
+    let stationPart = segmentKey;
+
+    // Check if it's old format with prefix
     const colonIndex = segmentKey.indexOf(':');
-    if (colonIndex === -1) return null;
+    if (colonIndex !== -1) {
+        stationPart = segmentKey.substring(colonIndex + 1);
+    }
 
-    const prefix = segmentKey.substring(0, colonIndex);
-    const suffix = segmentKey.substring(colonIndex + 1);
-
-    // Parse station names from suffix (format: "stationA|stationB")
-    const pipeIndex = suffix.indexOf('|');
+    // Parse station names (format: "stationA|stationB")
+    const pipeIndex = stationPart.indexOf('|');
     if (pipeIndex === -1) return null;
 
-    const stationA = suffix.substring(0, pipeIndex);
-    const stationB = suffix.substring(pipeIndex + 1);
+    const stationA = stationPart.substring(0, pipeIndex);
+    const stationB = stationPart.substring(pipeIndex + 1);
 
     const s1Data = stationMidpoints.get(stationA);
     const s2Data = stationMidpoints.get(stationB);
@@ -1898,7 +1951,7 @@ function recalculateWaypoints() {
                     if (s1.name === s2.name) continue;
 
                     const segmentNames = [s1.name, s2.name].sort();
-                    const normalizedKey = `${group.name}:${segmentNames[0]}|${segmentNames[1]}`;
+                    const normalizedKey = `${segmentNames[0]}|${segmentNames[1]}`;
 
                     if (!currentSegments.has(normalizedKey)) {
                         currentSegments.set(normalizedKey, { s1: s1, s2: s2 });
@@ -1935,7 +1988,7 @@ function recalculateWaypoints() {
             if (s1.name === s2.name) continue;
 
             const segmentNames = [s1.name, s2.name].sort();
-            const segmentKey = `${line.name}:${segmentNames[0]}|${segmentNames[1]}`;
+            const segmentKey = `${segmentNames[0]}|${segmentNames[1]}`;
             currentSegments.set(segmentKey, { s1: s1, s2: s2 });
         }
     });
@@ -1946,7 +1999,14 @@ function recalculateWaypoints() {
     let removedCount = 0;
 
     segmentWaypoints.forEach((waypoints, segmentKey) => {
-        const segment = currentSegments.get(segmentKey);
+        // Convert old format key if needed
+        let normalizedKey = segmentKey;
+        const colonIndex = segmentKey.indexOf(':');
+        if (colonIndex !== -1) {
+            normalizedKey = segmentKey.substring(colonIndex + 1);
+        }
+
+        const segment = currentSegments.get(normalizedKey);
 
         if (!segment) {
             // Segment doesn't exist in current selection - remove
@@ -1968,7 +2028,7 @@ function recalculateWaypoints() {
         });
 
         if (newWaypointList.length > 0) {
-            newWaypoints.set(segmentKey, newWaypointList);
+            newWaypoints.set(normalizedKey, newWaypointList);
         }
     });
 
@@ -2084,7 +2144,7 @@ function handleRightClick(e) {
                     if (s1.name === s2.name) continue;
 
                     const segmentNames = [s1.name, s2.name].sort();
-                    const normalizedKey = `${group.name}:${segmentNames[0]}|${segmentNames[1]}`;
+                    const normalizedKey = `${segmentNames[0]}|${segmentNames[1]}`;
 
                     if (!groupSegments.has(normalizedKey)) {
                         groupSegments.set(normalizedKey, { s1: s1, s2: s2, color: color, group: group.name });
@@ -2138,7 +2198,7 @@ function handleRightClick(e) {
 
             // Use station names in segment key for consistency (sorted for normalization)
             const segmentNames = [s1.name, s2.name].sort();
-            const segmentKey = `${line.name}:${segmentNames[0]}|${segmentNames[1]}`;
+            const segmentKey = `${segmentNames[0]}|${segmentNames[1]}`;
             allSegments.set(segmentKey, { s1: s1, s2: s2, color: color, group: null });
         }
     });
