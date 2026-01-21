@@ -30,6 +30,17 @@
             <!-- Sidebar -->
             <aside class="sidebar">
                 <div class="sidebar-section">
+                    <h3>フィルター</h3>
+                    <label style="display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: #6b7280;">会社</label>
+                    <select id="filter-company" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; margin-bottom: 1rem;">
+                        <option value="">全ての会社</option>
+                    </select>
+
+                    <label style="display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: #6b7280;">路線名検索</label>
+                    <input type="text" id="search-line" placeholder="路線名で検索..." style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; margin-bottom: 1rem;">
+                </div>
+
+                <div class="sidebar-section">
                     <h3>路線選択</h3>
                     <div class="filter-actions" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
                         <button onclick="selectAllLines()" class="btn-small" style="flex: 1; padding: 0.4rem; font-size: 0.85rem;">全選択</button>
@@ -91,6 +102,13 @@
 
             <!-- Main Diagram Area -->
             <main class="diagram-container">
+                <!-- Zoom Controls -->
+                <div class="zoom-controls">
+                    <button onclick="zoomIn()" class="zoom-btn" title="拡大">+</button>
+                    <button onclick="resetZoom()" class="zoom-btn" title="リセット">1:1</button>
+                    <button onclick="zoomOut()" class="zoom-btn" title="縮小">-</button>
+                    <span id="zoom-level" class="zoom-level">100%</span>
+                </div>
                 <div id="diagram-wrapper" class="diagram-wrapper">
                     <svg id="railroad-diagram" class="railroad-diagram" xmlns="http://www.w3.org/2000/svg">
                         <defs>

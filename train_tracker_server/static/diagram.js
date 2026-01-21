@@ -12,6 +12,8 @@ const UPDATE_INTERVAL = 5000; // 5 seconds
 let stationData = null;
 let trainData = null;
 let selectedLines = new Set();
+let companyFilter = '';
+let lineSearchFilter = '';
 let displaySettings = {
     showStationNames: true,
     showTrainNames: true,
@@ -28,6 +30,7 @@ const LINE_COLORS = [
 // SVG viewport settings
 let viewBox = { minX: 0, minY: 0, width: 1000, height: 600 };
 let scale = 1;
+let zoomLevel = 1.0;
 
 /**
  * Initialize the diagram viewer
@@ -81,6 +84,67 @@ function setupEventListeners() {
         displaySettings.showSpeeds = e.target.checked;
         renderDiagram();
     });
+
+    // Company filter
+    document.getElementById('filter-company').addEventListener('change', (e) => {
+        companyFilter = e.target.value;
+        updateLineSelector();
+        renderDiagram();
+    });
+
+    // Line search filter
+    document.getElementById('search-line').addEventListener('input', (e) => {
+        lineSearchFilter = e.target.value.toLowerCase();
+        updateLineSelector();
+    });
+
+    // Mouse wheel zoom
+    const svgElement = document.getElementById('railroad-diagram');
+    svgElement.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        zoomLevel = Math.max(0.5, Math.min(3.0, zoomLevel + delta));
+        applyZoom();
+    });
+}
+
+/**
+ * Zoom in
+ */
+function zoomIn() {
+    zoomLevel = Math.min(3.0, zoomLevel + 0.2);
+    applyZoom();
+}
+
+/**
+ * Zoom out
+ */
+function zoomOut() {
+    zoomLevel = Math.max(0.5, zoomLevel - 0.2);
+    applyZoom();
+}
+
+/**
+ * Reset zoom to 100%
+ */
+function resetZoom() {
+    zoomLevel = 1.0;
+    applyZoom();
+}
+
+/**
+ * Apply zoom level to SVG
+ */
+function applyZoom() {
+    const svgElement = document.getElementById('railroad-diagram');
+    const content = document.getElementById('diagram-content');
+
+    if (content) {
+        content.setAttribute('transform', `scale(${zoomLevel})`);
+    }
+
+    // Update zoom level display
+    document.getElementById('zoom-level').textContent = `${Math.round(zoomLevel * 100)}%`;
 }
 
 /**
@@ -111,6 +175,7 @@ async function loadStationData() {
                 console.log('[Diagram] Selected all lines:', selectedLines.size);
             }
 
+            updateCompanyFilter();
             updateLineSelector();
             renderDiagram();
             updateConnectionStatus(true);
@@ -144,6 +209,36 @@ async function loadTrainData() {
 }
 
 /**
+ * Update company filter dropdown
+ */
+function updateCompanyFilter() {
+    const filterSelect = document.getElementById('filter-company');
+
+    if (!stationData || !stationData.lines || stationData.lines.length === 0) {
+        return;
+    }
+
+    // Extract unique companies
+    const companies = new Set();
+    stationData.lines.forEach(line => {
+        if (line.company) {
+            companies.add(line.company);
+        }
+    });
+
+    // Build options
+    const currentValue = filterSelect.value;
+    let options = '<option value="">全ての会社</option>';
+
+    Array.from(companies).sort().forEach(company => {
+        const selected = company === currentValue ? 'selected' : '';
+        options += `<option value="${company}" ${selected}>${company}</option>`;
+    });
+
+    filterSelect.innerHTML = options;
+}
+
+/**
  * Update line selector in sidebar
  */
 function updateLineSelector() {
@@ -154,8 +249,28 @@ function updateLineSelector() {
         return;
     }
 
+    // Apply filters
+    const filteredLines = stationData.lines.filter(line => {
+        // Company filter
+        if (companyFilter && line.company !== companyFilter) {
+            return false;
+        }
+
+        // Line name search filter
+        if (lineSearchFilter && !line.name.toLowerCase().includes(lineSearchFilter)) {
+            return false;
+        }
+
+        return true;
+    });
+
+    if (filteredLines.length === 0) {
+        selector.innerHTML = '<p class="loading-text">該当する路線がありません</p>';
+        return;
+    }
+
     // Build line items
-    const lineItems = stationData.lines.map((line, index) => {
+    const lineItems = filteredLines.map((line, index) => {
         const color = LINE_COLORS[index % LINE_COLORS.length];
         const isChecked = selectedLines.has(line.name) ? 'checked' : '';
 
@@ -242,9 +357,9 @@ function gameToSVG(gameX, gameY, bounds) {
     const scaleY = svgHeight / (bounds.maxY - bounds.minY);
     scale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave margin
 
-    // Convert coordinates (flip Y axis for SVG)
+    // Convert coordinates
     const x = (gameX - bounds.minX) * scale;
-    const y = (bounds.maxY - gameY) * scale; // Flip Y
+    const y = (gameY - bounds.minY) * scale;
 
     return { x, y };
 }
@@ -290,6 +405,15 @@ function renderDiagram() {
     let totalStations = 0;
     let visibleTrains = 0;
 
+    // Collect all unique stations (avoid duplicate rendering)
+    const uniqueStations = new Map();
+
+    // Collect all unique track segments (avoid duplicate track rendering)
+    const uniqueSegments = new Map();
+
+    // Store all lines' SVG stations for later use
+    const linesData = [];
+
     linesToRender.forEach((line, lineIndex) => {
         const color = LINE_COLORS[lineIndex % LINE_COLORS.length];
         const stations = line.stations;
@@ -301,32 +425,71 @@ function renderDiagram() {
         // Convert station coordinates
         const svgStations = stations.map(station => {
             const pos = gameToSVG(station.x, station.y, bounds);
-            return {
+            const svgStation = {
                 ...station,
                 svgX: pos.x,
                 svgY: pos.y
             };
+
+            // Track unique stations by coordinate key
+            const key = `${station.x},${station.y},${station.z}`;
+            if (!uniqueStations.has(key)) {
+                uniqueStations.set(key, svgStation);
+            }
+
+            return svgStation;
         });
 
-        // Draw rail line connecting stations
-        svgContent += renderRailLine(svgStations, color);
+        // Extract track segments from this line
+        for (let i = 0; i < svgStations.length - 1; i++) {
+            const s1 = svgStations[i];
+            const s2 = svgStations[i + 1];
 
-        // Draw stations
-        svgStations.forEach(station => {
-            svgContent += renderStation(station, color);
+            // Create a unique key for this segment (order-independent)
+            const key1 = `${s1.x},${s1.y},${s1.z}`;
+            const key2 = `${s2.x},${s2.y},${s2.z}`;
+            const segmentKey = key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
+
+            // Store segment if not already stored
+            if (!uniqueSegments.has(segmentKey)) {
+                uniqueSegments.set(segmentKey, {
+                    s1: s1,
+                    s2: s2,
+                    color: color
+                });
+            }
+        }
+
+        // Store line data for train rendering
+        linesData.push({
+            line: line,
+            svgStations: svgStations,
+            color: color
         });
+    });
 
-        // Draw trains on this line
+    // Draw all unique track segments once
+    uniqueSegments.forEach(segment => {
+        svgContent += `<line x1="${segment.s1.svgX}" y1="${segment.s1.svgY}" x2="${segment.s2.svgX}" y2="${segment.s2.svgY}" class="rail-line" stroke="${segment.color}" stroke-width="2" />`;
+    });
+
+    // Draw trains for each line
+    linesData.forEach(lineData => {
         if (trainData && trainData.trains) {
-            const lineTrains = trainData.trains.filter(train => train.line === line.name);
+            const lineTrains = trainData.trains.filter(train => train.line === lineData.line.name);
             lineTrains.forEach(train => {
-                const trainSvg = renderTrain(train, bounds, color);
+                const trainSvg = renderTrain(train, bounds, lineData.color, lineData.svgStations);
                 if (trainSvg) {
                     visibleTrains++;
                     svgContent += trainSvg;
                 }
             });
         }
+    });
+
+    // Draw all unique stations once (after all tracks and trains are drawn)
+    uniqueStations.forEach(station => {
+        svgContent += renderStation(station, '#2c3e50');
     });
 
     svg.innerHTML = svgContent;
@@ -367,21 +530,84 @@ function renderStation(station, color) {
 }
 
 /**
- * Render train at actual game position
+ * Find nearest point on line segment to a given point
  */
-function renderTrain(train, bounds, color) {
+function nearestPointOnSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared === 0) return { x: x1, y: y1 };
+
+    let t = ((px - x1) * dx + (py - y1) * dy) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+
+    return {
+        x: x1 + t * dx,
+        y: y1 + t * dy
+    };
+}
+
+/**
+ * Find nearest point on track (any segment of the line)
+ * Returns both the point and the segment direction
+ */
+function snapToTrack(trainPos, svgStations) {
+    if (!svgStations || svgStations.length < 2) {
+        return { point: trainPos, angle: 0 };
+    }
+
+    let minDist = Infinity;
+    let nearest = trainPos;
+    let segmentAngle = 0;
+
+    // Check all segments of the track
+    for (let i = 0; i < svgStations.length - 1; i++) {
+        const s1 = svgStations[i];
+        const s2 = svgStations[i + 1];
+
+        const point = nearestPointOnSegment(trainPos.x, trainPos.y, s1.svgX, s1.svgY, s2.svgX, s2.svgY);
+        const dist = Math.sqrt(Math.pow(point.x - trainPos.x, 2) + Math.pow(point.y - trainPos.y, 2));
+
+        if (dist < minDist) {
+            minDist = dist;
+            nearest = point;
+            // Calculate angle of this segment (in degrees)
+            segmentAngle = Math.atan2(s2.svgY - s1.svgY, s2.svgX - s1.svgX) * 180 / Math.PI;
+        }
+    }
+
+    return { point: nearest, angle: segmentAngle };
+}
+
+/**
+ * Render train at actual game position, snapped to track
+ * Trains are rendered as directional triangles
+ */
+function renderTrain(train, bounds, color, svgStations) {
     if (!train.position) return '';
 
     // Convert train position to SVG coordinates
-    const pos = gameToSVG(train.position.x, train.position.y, bounds);
+    let trainSvgPos = gameToSVG(train.position.x, train.position.y, bounds);
+
+    // Snap to nearest point on track and get direction
+    const snapResult = snapToTrack(trainSvgPos, svgStations);
+    const pos = snapResult.point;
+    const angle = snapResult.angle;
 
     const trainColor = train.is_loading ? '#fbbf24' : '#ef4444';
     const pulseClass = train.is_loading ? 'loading-train' : '';
 
+    // Define triangle pointing to the right (will be rotated based on direction)
+    // Base size: 10px wide, 8px tall
+    const triangleSize = 8;
+    const trianglePoints = `0,-${triangleSize/2} ${triangleSize*1.5},0 0,${triangleSize/2}`;
+
     let svg = `
-        <g class="train-icon ${pulseClass}">
-            <circle cx="${pos.x}" cy="${pos.y}" r="6" fill="${trainColor}"
+        <g class="train-icon ${pulseClass}" transform="translate(${pos.x},${pos.y}) rotate(${angle})">
+            <polygon points="${trianglePoints}" fill="${trainColor}"
                     stroke="#fff" stroke-width="2" />
+        </g>
     `;
 
     let labelY = pos.y + 20;
@@ -404,8 +630,6 @@ function renderTrain(train, bounds, color) {
             </text>
         `;
     }
-
-    svg += '</g>';
 
     return svg;
 }

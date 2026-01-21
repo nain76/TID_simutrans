@@ -228,6 +228,50 @@ body {
     position: relative;
 }
 
+/* Zoom Controls */
+.zoom-controls {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 100;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    background: white;
+    padding: 0.5rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.zoom-btn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid #d1d5db;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1.2rem;
+    font-weight: bold;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.zoom-btn:hover {
+    background-color: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+.zoom-level {
+    font-size: 0.9rem;
+    color: #6b7280;
+    font-weight: 600;
+    min-width: 50px;
+    text-align: center;
+}
+
 .diagram-wrapper {
     width: 100%;
     height: 100%;
