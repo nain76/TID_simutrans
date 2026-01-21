@@ -241,7 +241,7 @@ async function loadTrainData() {
             trainData = data;
             updateGameTime(data.game_time);
             updateLastUpdate();
-            renderDiagram();
+            // Don't call renderDiagram() here - it's called by the caller
         }
     } catch (error) {
         console.error('Error loading train data:', error);
@@ -535,15 +535,22 @@ function renderDiagram() {
         svgContent += renderStation(station, '#2c3e50');
     });
 
+    // Collect all unique trains (avoid duplicate rendering)
+    const uniqueTrains = new Map();
+
     // Draw trains for each line (drawn last so they appear on top)
     linesData.forEach(lineData => {
         if (trainData && trainData.trains) {
             const lineTrains = trainData.trains.filter(train => train.line === lineData.line.name);
             lineTrains.forEach(train => {
-                const trainSvg = renderTrain(train, bounds, lineData.color, lineData.svgStations);
-                if (trainSvg) {
-                    visibleTrains++;
-                    svgContent += trainSvg;
+                // Use train name as unique key to prevent duplicates
+                if (!uniqueTrains.has(train.name)) {
+                    const trainSvg = renderTrain(train, bounds, lineData.color, lineData.svgStations);
+                    if (trainSvg) {
+                        uniqueTrains.set(train.name, true);
+                        visibleTrains++;
+                        svgContent += trainSvg;
+                    }
                 }
             });
         }
