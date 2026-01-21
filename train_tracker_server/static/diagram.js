@@ -19,7 +19,7 @@ let displaySettings = {
     showStationNames: true,
     showTrainNames: true,
     showSpeeds: true,
-    trackColor: '#6b7280',
+    trackColor: '#00ff00',
     trackOpacity: 1.0,
     useLineColorsForTracks: true,
     useLineColorsForTrains: true
@@ -103,6 +103,9 @@ function setupEventListeners() {
     // Track color settings
     document.getElementById('track-color').addEventListener('input', (e) => {
         displaySettings.trackColor = e.target.value;
+        // Automatically disable line colors for tracks when custom color is selected
+        displaySettings.useLineColorsForTracks = false;
+        document.getElementById('use-line-colors-for-tracks').checked = false;
         renderDiagram();
     });
 

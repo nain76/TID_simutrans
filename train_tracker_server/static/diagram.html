@@ -81,9 +81,14 @@
 
                 <div class="sidebar-section">
                     <h3>線路設定</h3>
+                    <label class="checkbox-label" style="margin-bottom: 0.8rem;">
+                        <input type="checkbox" id="use-line-colors-for-tracks" checked>
+                        路線の色を線路に適用
+                    </label>
                     <div style="margin-bottom: 1rem;">
                         <label style="display: block; margin-bottom: 0.3rem; font-size: 0.9rem; color: #6b7280;">線路の色</label>
-                        <input type="color" id="track-color" value="#6b7280" style="width: 100%; height: 36px; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;">
+                        <input type="color" id="track-color" value="#00ff00" style="width: 100%; height: 36px; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;">
+                        <p style="font-size: 0.75rem; color: #9ca3af; margin-top: 0.3rem; margin-bottom: 0;">※色を変更すると「路線の色を線路に適用」が自動的にOFFになります</p>
                     </div>
                     <div style="margin-bottom: 0.5rem;">
                         <label style="display: block; margin-bottom: 0.3rem; font-size: 0.9rem; color: #6b7280;">
@@ -91,10 +96,6 @@
                         </label>
                         <input type="range" id="track-opacity" min="0" max="100" value="100" style="width: 100%;">
                     </div>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="use-line-colors-for-tracks" checked>
-                        路線の色を線路に適用
-                    </label>
                 </div>
 
                 <div class="sidebar-section">
@@ -140,6 +141,7 @@
                         <p><strong>線路設定:</strong></p>
                         <p>• 線路の色と透明度を調整可能</p>
                         <p>• 路線ごとの色を線路に適用可能</p>
+                        <p>• カスタム色を選択すると自動で路線色をOFF</p>
                         <p><strong>路線グループ:</strong></p>
                         <p>• グループ内の路線を1本線で表示</p>
                         <p>• 複数路線をまとめて管理可能</p>
