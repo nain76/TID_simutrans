@@ -63,7 +63,8 @@ config <- {
 persistent <- {
     last_export_day = -1,  // Track last export day (-1 means never exported)
     export_count = 0,
-    ai_player = null  // Store AI player reference
+    ai_player = null,  // Store AI player reference
+    export_type = "train"  // Alternate between "train" and "station" to avoid timeout
 }
 
 /**
@@ -116,18 +117,26 @@ function step() {
 
 /**
  * Main work function - called periodically by step()
- * Exports data every 3 in-game days
+ * Exports data every 2 in-game days
+ * Alternates between train and station data to avoid timeout
  * Generator function to handle yields properly
  */
 function work() {
     local current_day = get_total_days()
 
-    // Check if 3 days have passed since last export (or never exported)
+    // Check if 2 days have passed since last export (or never exported)
     if (persistent.last_export_day == -1 || current_day - persistent.last_export_day >= config.export_interval_days) {
-        // Call export functions (they handle their own yields internally via _step_generator)
-        export_train_data()
-        export_station_data()
+        // Update last_export_day BEFORE executing to prevent duplicate execution
         persistent.last_export_day = current_day
+
+        // Alternate between train and station data export to avoid timeout
+        if (persistent.export_type == "train") {
+            export_train_data()
+            persistent.export_type = "station"
+        } else {
+            export_station_data()
+            persistent.export_type = "train"
+        }
     }
 
     yield null  // Always yield to prevent blocking
@@ -366,5 +375,6 @@ function save() {
     return "persistent <- { " +
            "last_export_day = " + persistent.last_export_day + ", " +
            "export_count = " + persistent.export_count + ", " +
-           "ai_player = null }"
+           "ai_player = null, " +
+           "export_type = \"" + persistent.export_type + "\" }"
 }
