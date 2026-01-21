@@ -522,29 +522,145 @@ function renderDiagram() {
 
     // Create a map of line name to group index (for coloring)
     const lineToGroupIndex = new Map();
-    const ungroupedLines = [];
+    const processedGroups = new Set(); // Track which groups we've already processed
 
-    linesToRender.forEach(line => {
-        let foundInGroup = false;
-        lineGroups.forEach((group, groupIndex) => {
+    // Build a map of which lines belong to which group
+    const lineToGroup = new Map();
+    lineGroups.forEach(group => {
+        group.lines.forEach(lineName => {
+            lineToGroup.set(lineName, group.name);
+        });
+    });
+
+    // Process groups first: collect all stations from all lines in each group
+    lineGroups.forEach((group, groupIndex) => {
+        const color = LINE_COLORS[groupIndex % LINE_COLORS.length];
+        const groupStationsMap = new Map(); // Map of station name to midpoint
+        const groupLinesData = []; // Store line data for trains in this group
+
+        // Collect all stations from all lines in this group
+        linesToRender.forEach(line => {
             if (group.lines.has(line.name)) {
                 lineToGroupIndex.set(line.name, groupIndex);
-                foundInGroup = true;
+
+                const stations = line.stations;
+                if (!stations || stations.length === 0) return;
+
+                // Replace station positions with midpoints and deduplicate
+                const processedStations = [];
+                const seenNames = new Set();
+
+                stations.forEach(station => {
+                    // Skip if we already added this station in this line (circular routes)
+                    if (seenNames.has(station.name)) {
+                        return;
+                    }
+                    seenNames.add(station.name);
+
+                    // Get midpoint for this station name
+                    const midpoint = stationMidpoints.get(station.name);
+                    if (midpoint) {
+                        processedStations.push(midpoint);
+                        // Add to group stations (will be used to create merged track)
+                        if (!groupStationsMap.has(station.name)) {
+                            groupStationsMap.set(station.name, midpoint);
+                        }
+                    }
+                });
+
+                // Convert to SVG coordinates for train rendering
+                const svgStations = processedStations.map(station => {
+                    const pos = gameToSVG(station.x, station.y, bounds);
+                    const svgStation = {
+                        ...station,
+                        svgX: pos.x,
+                        svgY: pos.y
+                    };
+
+                    // Track unique stations globally (by name)
+                    if (!uniqueStations.has(station.name)) {
+                        uniqueStations.set(station.name, svgStation);
+                    }
+
+                    return svgStation;
+                });
+
+                // Store line data for train rendering
+                groupLinesData.push({
+                    line: line,
+                    svgStations: svgStations,
+                    color: color
+                });
             }
         });
-        if (!foundInGroup) {
-            ungroupedLines.push(line.name);
+
+        // Now create merged track segments for this group
+        // Find the line with the most stations (typically the local/all-stops service)
+        // and use its segments as the base track
+        let baseLine = null;
+        let maxStations = 0;
+
+        linesToRender.forEach(line => {
+            if (group.lines.has(line.name)) {
+                const uniqueStationCount = new Set(line.stations.map(s => s.name)).size;
+                if (uniqueStationCount > maxStations) {
+                    maxStations = uniqueStationCount;
+                    baseLine = line;
+                }
+            }
+        });
+
+        // Use the base line's segments for the group track
+        if (baseLine && baseLine.stations && baseLine.stations.length > 0) {
+            const lineStations = [];
+            const seenNames = new Set();
+
+            baseLine.stations.forEach(station => {
+                if (seenNames.has(station.name)) return;
+                seenNames.add(station.name);
+
+                const midpoint = stationMidpoints.get(station.name);
+                if (midpoint) {
+                    const pos = gameToSVG(midpoint.x, midpoint.y, bounds);
+                    lineStations.push({
+                        ...midpoint,
+                        svgX: pos.x,
+                        svgY: pos.y
+                    });
+                }
+            });
+
+            // Create segments from the base line
+            for (let i = 0; i < lineStations.length - 1; i++) {
+                const s1 = lineStations[i];
+                const s2 = lineStations[i + 1];
+
+                if (s1.name === s2.name) continue;
+
+                const segmentKey = `${group.name}:${i}`;
+                uniqueSegments.set(segmentKey, {
+                    s1: s1,
+                    s2: s2,
+                    color: color,
+                    group: group.name
+                });
+            }
         }
+
+        // Add group lines data to main linesData
+        linesData.push(...groupLinesData);
+        processedGroups.add(group.name);
     });
 
-    // Assign indices to ungrouped lines
-    ungroupedLines.forEach((lineName, index) => {
-        lineToGroupIndex.set(lineName, lineGroups.length + index);
-    });
-
+    // Process ungrouped lines
     linesToRender.forEach((line, lineIndex) => {
-        // Get color based on group or individual line
-        const colorIndex = lineToGroupIndex.get(line.name) || lineIndex;
+        // Skip if this line belongs to a group (already processed)
+        if (lineToGroup.has(line.name)) {
+            return;
+        }
+
+        // Calculate color index for ungrouped lines
+        const colorIndex = lineGroups.length + lineIndex;
         const color = LINE_COLORS[colorIndex % LINE_COLORS.length];
         const stations = line.stations;
 
@@ -555,13 +671,11 @@ function renderDiagram() {
         const seenNames = new Set();
 
         stations.forEach(station => {
-            // Skip if we already added this station in this line (circular routes)
             if (seenNames.has(station.name)) {
                 return;
             }
             seenNames.add(station.name);
 
-            // Get midpoint for this station name
             const midpoint = stationMidpoints.get(station.name);
             if (midpoint) {
                 processedStations.push(midpoint);
@@ -577,7 +691,6 @@ function renderDiagram() {
                 svgY: pos.y
             };
 
-            // Track unique stations globally (by name)
             if (!uniqueStations.has(station.name)) {
                 uniqueStations.set(station.name, svgStation);
             }
@@ -585,42 +698,22 @@ function renderDiagram() {
             return svgStation;
         });
 
-        // Check if this line belongs to a group
-        let groupName = null;
-        for (const group of lineGroups) {
-            if (group.lines.has(line.name)) {
-                groupName = group.name;
-                break;
-            }
-        }
-
-        // Extract track segments from this line
+        // Extract track segments from this ungrouped line
         for (let i = 0; i < svgStations.length - 1; i++) {
             const s1 = svgStations[i];
             const s2 = svgStations[i + 1];
 
-            // Skip if same station name
             if (s1.name === s2.name) {
                 continue;
             }
 
-            // Create a unique key for this segment
-            // If line is in a group, use group name prefix to merge segments
-            const key1 = s1.name;
-            const key2 = s2.name;
-            const baseKey = key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
-            const segmentKey = groupName ? `${groupName}:${baseKey}` : `${line.name}:${baseKey}`;
-
-            // Store segment if not already stored
-            // For grouped lines, segments are shared and drawn as one line
-            if (!uniqueSegments.has(segmentKey)) {
-                uniqueSegments.set(segmentKey, {
-                    s1: s1,
-                    s2: s2,
-                    color: color,
-                    group: groupName
-                });
-            }
+            const segmentKey = `${line.name}:${i}`;
+            uniqueSegments.set(segmentKey, {
+                s1: s1,
+                s2: s2,
+                color: color,
+                group: null
+            });
         }
 
         // Store line data for train rendering
