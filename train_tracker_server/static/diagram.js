@@ -724,12 +724,19 @@ function renderDiagram() {
             uniqueSegments.set(key, segment);
         });
 
-        // Convert groupSegments to array for train snapping
-        const groupSegmentsArray = Array.from(groupSegments.entries()).map(([key, seg]) => ({
-            segmentKey: key,
-            s1: seg.s1,
-            s2: seg.s2
-        }));
+        // Convert groupSegments to array for train snapping (include waypoints directly)
+        const groupSegmentsArray = Array.from(groupSegments.entries()).map(([key, seg]) => {
+            const relativeWaypoints = segmentWaypoints.get(key) || [];
+            const waypoints = relativeWaypoints
+                .filter(rel => rel.t !== undefined && rel.offset !== undefined)
+                .map(rel => relativeToAbsolute(rel, seg.s1, seg.s2));
+            return {
+                segmentKey: key,
+                s1: seg.s1,
+                s2: seg.s2,
+                waypoints: waypoints
+            };
+        });
 
         // Add segments to each line in the group
         groupLinesData.forEach(ld => {
@@ -806,10 +813,18 @@ function renderDiagram() {
                 color: color,
                 group: null
             });
+
+            // Get waypoints for this segment and convert to absolute coordinates
+            const relativeWaypoints = segmentWaypoints.get(segmentKey) || [];
+            const waypoints = relativeWaypoints
+                .filter(rel => rel.t !== undefined && rel.offset !== undefined)
+                .map(rel => relativeToAbsolute(rel, s1, s2));
+
             lineSegmentsArray.push({
                 segmentKey: segmentKey,
                 s1: s1,
-                s2: s2
+                s2: s2,
+                waypoints: waypoints
             });
         }
 
@@ -1024,11 +1039,8 @@ function snapToTrack(trainPos, svgStations, lineSegments) {
     // If lineSegments with waypoints are provided, use them
     if (lineSegments && lineSegments.length > 0) {
         lineSegments.forEach(seg => {
-            const relativeWaypoints = segmentWaypoints.get(seg.segmentKey) || [];
-            // Convert from relative to absolute coordinates (only use relative format)
-            const waypoints = relativeWaypoints
-                .filter(rel => rel.t !== undefined && rel.offset !== undefined)
-                .map(rel => relativeToAbsolute(rel, seg.s1, seg.s2));
+            // Use waypoints directly from lineSegments (already converted to absolute coordinates)
+            const waypoints = seg.waypoints || [];
             const points = [
                 { x: seg.s1.svgX, y: seg.s1.svgY },
                 ...waypoints,
