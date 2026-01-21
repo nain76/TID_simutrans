@@ -443,16 +443,45 @@ function renderDiagram() {
 
     // Render SVG
     let svgContent = '';
-    let totalStations = 0;
     let visibleTrains = 0;
 
-    // Collect all unique stations (avoid duplicate rendering)
-    const uniqueStations = new Map();
+    // Step 1: Collect all stations from all lines and group by station name
+    const stationsByName = new Map();
 
-    // Collect all unique track segments (avoid duplicate track rendering)
+    linesToRender.forEach((line, lineIndex) => {
+        const stations = line.stations;
+        if (!stations || stations.length === 0) return;
+
+        stations.forEach(station => {
+            if (!stationsByName.has(station.name)) {
+                stationsByName.set(station.name, []);
+            }
+            stationsByName.get(station.name).push({
+                x: station.x,
+                y: station.y,
+                name: station.name
+            });
+        });
+    });
+
+    // Step 2: Calculate midpoint for each station name
+    const stationMidpoints = new Map();
+
+    stationsByName.forEach((positions, stationName) => {
+        // Calculate average position (midpoint)
+        const avgX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
+        const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
+
+        stationMidpoints.set(stationName, {
+            name: stationName,
+            x: avgX,
+            y: avgY
+        });
+    });
+
+    // Step 3: Build deduplicated line data using midpoints
     const uniqueSegments = new Map();
-
-    // Store all lines' SVG stations for later use
+    const uniqueStations = new Map();
     const linesData = [];
 
     linesToRender.forEach((line, lineIndex) => {
@@ -461,22 +490,26 @@ function renderDiagram() {
 
         if (!stations || stations.length === 0) return;
 
-        // Deduplicate stations within this line first (handle circular routes)
-        const uniqueLineStations = new Map();
-        const deduplicatedStations = [];
+        // Replace station positions with midpoints and deduplicate
+        const processedStations = [];
+        const seenNames = new Set();
 
         stations.forEach(station => {
-            const key = `${Math.round(station.x)},${Math.round(station.y)}`;
-            if (!uniqueLineStations.has(key)) {
-                uniqueLineStations.set(key, station);
-                deduplicatedStations.push(station);
+            // Skip if we already added this station in this line (circular routes)
+            if (seenNames.has(station.name)) {
+                return;
+            }
+            seenNames.add(station.name);
+
+            // Get midpoint for this station name
+            const midpoint = stationMidpoints.get(station.name);
+            if (midpoint) {
+                processedStations.push(midpoint);
             }
         });
 
-        totalStations += deduplicatedStations.length;
-
-        // Convert station coordinates
-        const svgStations = deduplicatedStations.map(station => {
+        // Convert to SVG coordinates
+        const svgStations = processedStations.map(station => {
             const pos = gameToSVG(station.x, station.y, bounds);
             const svgStation = {
                 ...station,
@@ -484,10 +517,9 @@ function renderDiagram() {
                 svgY: pos.y
             };
 
-            // Track unique stations globally (across all lines)
-            const key = `${Math.round(station.x)},${Math.round(station.y)}`;
-            if (!uniqueStations.has(key)) {
-                uniqueStations.set(key, svgStation);
+            // Track unique stations globally (by name)
+            if (!uniqueStations.has(station.name)) {
+                uniqueStations.set(station.name, svgStation);
             }
 
             return svgStation;
@@ -498,14 +530,14 @@ function renderDiagram() {
             const s1 = svgStations[i];
             const s2 = svgStations[i + 1];
 
-            // Skip if same station (shouldn't happen after dedup, but be safe)
-            if (Math.round(s1.x) === Math.round(s2.x) && Math.round(s1.y) === Math.round(s2.y)) {
+            // Skip if same station name
+            if (s1.name === s2.name) {
                 continue;
             }
 
-            // Create a unique key for this segment (order-independent, using game coordinates)
-            const key1 = `${Math.round(s1.x)},${Math.round(s1.y)}`;
-            const key2 = `${Math.round(s2.x)},${Math.round(s2.y)}`;
+            // Create a unique key for this segment (order-independent, using station names)
+            const key1 = s1.name;
+            const key2 = s2.name;
             const segmentKey = key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
 
             // Store segment if not already stored
@@ -525,6 +557,8 @@ function renderDiagram() {
             color: color
         });
     });
+
+    const totalStations = uniqueStations.size;
 
     // Draw all unique track segments once
     uniqueSegments.forEach(segment => {
