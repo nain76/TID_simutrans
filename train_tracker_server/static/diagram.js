@@ -431,8 +431,8 @@ function renderDiagram() {
                 svgY: pos.y
             };
 
-            // Track unique stations by coordinate key
-            const key = `${station.x},${station.y},${station.z}`;
+            // Track unique stations by coordinate key (rounded to avoid floating point issues)
+            const key = `${Math.round(station.x)},${Math.round(station.y)},${Math.round(station.z)}`;
             if (!uniqueStations.has(key)) {
                 uniqueStations.set(key, svgStation);
             }
@@ -445,9 +445,9 @@ function renderDiagram() {
             const s1 = svgStations[i];
             const s2 = svgStations[i + 1];
 
-            // Create a unique key for this segment (order-independent)
-            const key1 = `${s1.x},${s1.y},${s1.z}`;
-            const key2 = `${s2.x},${s2.y},${s2.z}`;
+            // Create a unique key for this segment (order-independent, rounded to avoid floating point issues)
+            const key1 = `${Math.round(s1.x)},${Math.round(s1.y)},${Math.round(s1.z)}`;
+            const key2 = `${Math.round(s2.x)},${Math.round(s2.y)},${Math.round(s2.z)}`;
             const segmentKey = key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
 
             // Store segment if not already stored
@@ -473,7 +473,12 @@ function renderDiagram() {
         svgContent += `<line x1="${segment.s1.svgX}" y1="${segment.s1.svgY}" x2="${segment.s2.svgX}" y2="${segment.s2.svgY}" class="rail-line" stroke="${segment.color}" stroke-width="2" />`;
     });
 
-    // Draw trains for each line
+    // Draw all unique stations once (after all tracks, before trains)
+    uniqueStations.forEach(station => {
+        svgContent += renderStation(station, '#2c3e50');
+    });
+
+    // Draw trains for each line (drawn last so they appear on top)
     linesData.forEach(lineData => {
         if (trainData && trainData.trains) {
             const lineTrains = trainData.trains.filter(train => train.line === lineData.line.name);
@@ -485,11 +490,6 @@ function renderDiagram() {
                 }
             });
         }
-    });
-
-    // Draw all unique stations once (after all tracks and trains are drawn)
-    uniqueStations.forEach(station => {
-        svgContent += renderStation(station, '#2c3e50');
     });
 
     svg.innerHTML = svgContent;
@@ -599,8 +599,8 @@ function renderTrain(train, bounds, color, svgStations) {
     const pulseClass = train.is_loading ? 'loading-train' : '';
 
     // Define triangle pointing to the right (will be rotated based on direction)
-    // Base size: 10px wide, 8px tall
-    const triangleSize = 8;
+    // Base size: 24px wide, 16px tall
+    const triangleSize = 16;
     const trianglePoints = `0,-${triangleSize/2} ${triangleSize*1.5},0 0,${triangleSize/2}`;
 
     let svg = `
