@@ -797,7 +797,9 @@ function renderDiagram() {
                 continue;
             }
 
-            const segmentKey = `${line.name}:${i}`;
+            // Use station names in segment key for consistency (sorted for normalization)
+            const segmentNames = [s1.name, s2.name].sort();
+            const segmentKey = `${line.name}:${segmentNames[0]}-${segmentNames[1]}`;
             uniqueSegments.set(segmentKey, {
                 s1: s1,
                 s2: s2,
@@ -1747,15 +1749,7 @@ function handleWaypointDrag(e) {
 function getSegmentData(segmentKey, linesToRender, stationMidpoints, bounds) {
     // Parse segment key to find the segment
     // Group segments: "groupName:stationA-stationB"
-    // Ungrouped segments: "lineName:index"
-
-    // Build line to group map
-    const lineToGroup = new Map();
-    lineGroups.forEach(group => {
-        group.lines.forEach(lineName => {
-            lineToGroup.set(lineName, group.name);
-        });
-    });
+    // Ungrouped segments: "lineName:stationA-stationB"
 
     // Check if it's a group segment
     const colonIndex = segmentKey.indexOf(':');
@@ -1764,45 +1758,18 @@ function getSegmentData(segmentKey, linesToRender, stationMidpoints, bounds) {
     const prefix = segmentKey.substring(0, colonIndex);
     const suffix = segmentKey.substring(colonIndex + 1);
 
-    // Check if prefix is a group name
-    const group = lineGroups.find(g => g.name === prefix);
-    if (group) {
-        // It's a group segment: "groupName:stationA-stationB"
-        const dashIndex = suffix.indexOf('-');
-        if (dashIndex === -1) return null;
+    // Parse station names from suffix (format: "stationA-stationB")
+    const dashIndex = suffix.indexOf('-');
+    if (dashIndex === -1) return null;
 
-        const stationA = suffix.substring(0, dashIndex);
-        const stationB = suffix.substring(dashIndex + 1);
+    const stationA = suffix.substring(0, dashIndex);
+    const stationB = suffix.substring(dashIndex + 1);
 
-        const s1Data = stationMidpoints.get(stationA);
-        const s2Data = stationMidpoints.get(stationB);
+    const s1Data = stationMidpoints.get(stationA);
+    const s2Data = stationMidpoints.get(stationB);
 
-        if (s1Data && s2Data) {
-            return { s1: s1Data, s2: s2Data };
-        }
-    } else {
-        // It's an ungrouped segment: "lineName:index"
-        const lineIndex = parseInt(suffix);
-        if (isNaN(lineIndex)) return null;
-
-        const line = linesToRender.find(l => l.name === prefix);
-        if (!line) return null;
-
-        // Get stations for this line
-        const lineStations = [];
-        const seenNames = new Set();
-        line.stations.forEach(station => {
-            if (seenNames.has(station.name)) return;
-            seenNames.add(station.name);
-            const midpoint = stationMidpoints.get(station.name);
-            if (midpoint) {
-                lineStations.push(midpoint);
-            }
-        });
-
-        if (lineIndex >= 0 && lineIndex < lineStations.length - 1) {
-            return { s1: lineStations[lineIndex], s2: lineStations[lineIndex + 1] };
-        }
+    if (s1Data && s2Data) {
+        return { s1: s1Data, s2: s2Data };
     }
 
     return null;
@@ -1994,7 +1961,9 @@ function handleRightClick(e) {
 
             if (s1.name === s2.name) continue;
 
-            const segmentKey = `${line.name}:${i}`;
+            // Use station names in segment key for consistency (sorted for normalization)
+            const segmentNames = [s1.name, s2.name].sort();
+            const segmentKey = `${line.name}:${segmentNames[0]}-${segmentNames[1]}`;
             allSegments.set(segmentKey, { s1: s1, s2: s2, color: color, group: null });
         }
     });
