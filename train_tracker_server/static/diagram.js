@@ -18,8 +18,13 @@ let displaySettings = {
     showTracks: true,
     showStationNames: true,
     showTrainNames: true,
-    showSpeeds: true
+    showSpeeds: true,
+    trackColor: '#6b7280',
+    trackOpacity: 1.0,
+    useLineColorsForTracks: true,
+    useLineColorsForTrains: true
 };
+let lineGroups = []; // Array of {name: string, lines: Set<string>}
 
 // Line colors (automatically assigned)
 const LINE_COLORS = [
@@ -92,6 +97,28 @@ function setupEventListeners() {
 
     document.getElementById('show-speeds').addEventListener('change', (e) => {
         displaySettings.showSpeeds = e.target.checked;
+        renderDiagram();
+    });
+
+    // Track color settings
+    document.getElementById('track-color').addEventListener('input', (e) => {
+        displaySettings.trackColor = e.target.value;
+        renderDiagram();
+    });
+
+    document.getElementById('track-opacity').addEventListener('input', (e) => {
+        displaySettings.trackOpacity = e.target.value / 100;
+        document.getElementById('track-opacity-value').textContent = `${e.target.value}%`;
+        renderDiagram();
+    });
+
+    document.getElementById('use-line-colors-for-tracks').addEventListener('change', (e) => {
+        displaySettings.useLineColorsForTracks = e.target.checked;
+        renderDiagram();
+    });
+
+    document.getElementById('use-line-colors-for-trains').addEventListener('change', (e) => {
+        displaySettings.useLineColorsForTrains = e.target.checked;
         renderDiagram();
     });
 
@@ -490,8 +517,32 @@ function renderDiagram() {
     const uniqueStations = new Map();
     const linesData = [];
 
+    // Create a map of line name to group index (for coloring)
+    const lineToGroupIndex = new Map();
+    const ungroupedLines = [];
+
+    linesToRender.forEach(line => {
+        let foundInGroup = false;
+        lineGroups.forEach((group, groupIndex) => {
+            if (group.lines.has(line.name)) {
+                lineToGroupIndex.set(line.name, groupIndex);
+                foundInGroup = true;
+            }
+        });
+        if (!foundInGroup) {
+            ungroupedLines.push(line.name);
+        }
+    });
+
+    // Assign indices to ungrouped lines
+    ungroupedLines.forEach((lineName, index) => {
+        lineToGroupIndex.set(lineName, lineGroups.length + index);
+    });
+
     linesToRender.forEach((line, lineIndex) => {
-        const color = LINE_COLORS[lineIndex % LINE_COLORS.length];
+        // Get color based on group or individual line
+        const colorIndex = lineToGroupIndex.get(line.name) || lineIndex;
+        const color = LINE_COLORS[colorIndex % LINE_COLORS.length];
         const stations = line.stations;
 
         if (!stations || stations.length === 0) return;
@@ -531,6 +582,15 @@ function renderDiagram() {
             return svgStation;
         });
 
+        // Check if this line belongs to a group
+        let groupName = null;
+        for (const group of lineGroups) {
+            if (group.lines.has(line.name)) {
+                groupName = group.name;
+                break;
+            }
+        }
+
         // Extract track segments from this line
         for (let i = 0; i < svgStations.length - 1; i++) {
             const s1 = svgStations[i];
@@ -541,17 +601,21 @@ function renderDiagram() {
                 continue;
             }
 
-            // Create a unique key for this segment (order-independent, using station names)
+            // Create a unique key for this segment
+            // If line is in a group, use group name prefix to merge segments
             const key1 = s1.name;
             const key2 = s2.name;
-            const segmentKey = key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
+            const baseKey = key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
+            const segmentKey = groupName ? `${groupName}:${baseKey}` : `${line.name}:${baseKey}`;
 
             // Store segment if not already stored
+            // For grouped lines, segments are shared and drawn as one line
             if (!uniqueSegments.has(segmentKey)) {
                 uniqueSegments.set(segmentKey, {
                     s1: s1,
                     s2: s2,
-                    color: color
+                    color: color,
+                    group: groupName
                 });
             }
         }
@@ -569,7 +633,8 @@ function renderDiagram() {
     // Draw all unique track segments once (if enabled)
     if (displaySettings.showTracks) {
         uniqueSegments.forEach(segment => {
-            svgContent += `<line x1="${segment.s1.svgX}" y1="${segment.s1.svgY}" x2="${segment.s2.svgX}" y2="${segment.s2.svgY}" class="rail-line" stroke="${segment.color}" stroke-width="2" stroke-opacity="0.3" />`;
+            const trackColor = displaySettings.useLineColorsForTracks ? segment.color : displaySettings.trackColor;
+            svgContent += `<line x1="${segment.s1.svgX}" y1="${segment.s1.svgY}" x2="${segment.s2.svgX}" y2="${segment.s2.svgY}" class="rail-line" stroke="${trackColor}" stroke-width="2" stroke-opacity="${displaySettings.trackOpacity}" />`;
         });
     }
 
@@ -702,7 +767,13 @@ function renderTrain(train, bounds, color, svgStations) {
     const pos = snapResult.point;
     const angle = snapResult.angle;
 
-    const trainColor = train.is_loading ? '#fbbf24' : '#ef4444';
+    // Use line color for train icon, or default colors
+    let trainColor;
+    if (displaySettings.useLineColorsForTrains) {
+        trainColor = color;
+    } else {
+        trainColor = train.is_loading ? '#fbbf24' : '#ef4444';
+    }
     const pulseClass = train.is_loading ? 'loading-train' : '';
 
     // Define triangle pointing to the right (will be rotated based on direction)
@@ -782,6 +853,138 @@ function updateStats(lines, trains, stations) {
     document.getElementById('stat-lines').textContent = lines;
     document.getElementById('stat-trains').textContent = trains;
     document.getElementById('stat-stations').textContent = stations;
+}
+
+/**
+ * Create a new line group
+ */
+function createGroup() {
+    const input = document.getElementById('group-name-input');
+    const groupName = input.value.trim();
+
+    if (!groupName) {
+        alert('グループ名を入力してください');
+        return;
+    }
+
+    // Check if group already exists
+    if (lineGroups.some(g => g.name === groupName)) {
+        alert('このグループ名は既に存在します');
+        return;
+    }
+
+    lineGroups.push({
+        name: groupName,
+        lines: new Set()
+    });
+
+    input.value = '';
+    updateGroupsList();
+    renderDiagram();
+}
+
+/**
+ * Delete a group
+ */
+function deleteGroup(groupName) {
+    lineGroups = lineGroups.filter(g => g.name !== groupName);
+    updateGroupsList();
+    renderDiagram();
+}
+
+/**
+ * Add a line to a group
+ */
+function addLineToGroup(groupName, lineName) {
+    const group = lineGroups.find(g => g.name === groupName);
+    if (group) {
+        group.lines.add(lineName);
+        updateGroupsList();
+        renderDiagram();
+    }
+}
+
+/**
+ * Remove a line from a group
+ */
+function removeLineFromGroup(groupName, lineName) {
+    const group = lineGroups.find(g => g.name === groupName);
+    if (group) {
+        group.lines.delete(lineName);
+        updateGroupsList();
+        renderDiagram();
+    }
+}
+
+/**
+ * Update groups list display
+ */
+function updateGroupsList() {
+    const container = document.getElementById('groups-list');
+
+    if (lineGroups.length === 0) {
+        container.innerHTML = '<p class="loading-text" style="font-size: 0.85rem; color: #9ca3af;">グループはありません</p>';
+        return;
+    }
+
+    let html = '';
+
+    lineGroups.forEach((group, index) => {
+        const color = LINE_COLORS[index % LINE_COLORS.length];
+
+        html += `
+            <div style="border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; background: #f9fafb;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+                    <div style="display: flex; align-items: center; gap: 0.4rem;">
+                        <div class="line-color" style="background-color: ${color}; width: 12px; height: 12px; border-radius: 2px;"></div>
+                        <strong style="font-size: 0.9rem;">${group.name}</strong>
+                    </div>
+                    <button onclick="deleteGroup('${group.name.replace(/'/g, "\\'")}')" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; background: #ef4444; color: white; border: none; border-radius: 3px; cursor: pointer;">削除</button>
+                </div>
+                <div style="margin-top: 0.3rem;">
+                    <select onchange="handleAddLineToGroup(this, '${group.name.replace(/'/g, "\\'")}')" style="width: 100%; padding: 0.3rem; font-size: 0.8rem; border: 1px solid #d1d5db; border-radius: 3px;">
+                        <option value="">路線を追加...</option>
+                        ${getAvailableLinesForGroup(group).map(line =>
+                            `<option value="${line}">${line}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div style="margin-top: 0.3rem; font-size: 0.8rem;">
+                    ${Array.from(group.lines).map(line => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.2rem; background: white; border-radius: 2px; margin-bottom: 0.2rem;">
+                            <span>${line}</span>
+                            <button onclick="removeLineFromGroup('${group.name.replace(/'/g, "\\'")}', '${line.replace(/'/g, "\\'")}')" style="padding: 0.1rem 0.3rem; font-size: 0.7rem; background: #ef4444; color: white; border: none; border-radius: 2px; cursor: pointer;">×</button>
+                        </div>
+                    `).join('')}
+                    ${group.lines.size === 0 ? '<p style="color: #9ca3af; font-size: 0.75rem; margin: 0;">路線がありません</p>' : ''}
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+/**
+ * Get available lines for a group (lines not already in the group)
+ */
+function getAvailableLinesForGroup(group) {
+    if (!stationData || !stationData.lines) return [];
+
+    return stationData.lines
+        .map(line => line.name)
+        .filter(lineName => !group.lines.has(lineName));
+}
+
+/**
+ * Handle adding a line to a group from select
+ */
+function handleAddLineToGroup(select, groupName) {
+    const lineName = select.value;
+    if (lineName) {
+        addLineToGroup(groupName, lineName);
+        select.value = '';
+    }
 }
 
 // Initialize on page load

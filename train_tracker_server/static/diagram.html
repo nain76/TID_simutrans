@@ -70,9 +70,42 @@
                         速度を表示
                     </label>
                     <label class="checkbox-label">
+                        <input type="checkbox" id="use-line-colors-for-trains" checked>
+                        列車アイコンに路線の色を適用
+                    </label>
+                    <label class="checkbox-label">
                         <input type="checkbox" id="auto-layout" checked>
                         自動レイアウト
                     </label>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>線路設定</h3>
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; margin-bottom: 0.3rem; font-size: 0.9rem; color: #6b7280;">線路の色</label>
+                        <input type="color" id="track-color" value="#6b7280" style="width: 100%; height: 36px; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;">
+                    </div>
+                    <div style="margin-bottom: 0.5rem;">
+                        <label style="display: block; margin-bottom: 0.3rem; font-size: 0.9rem; color: #6b7280;">
+                            線路の透明度: <span id="track-opacity-value">100%</span>
+                        </label>
+                        <input type="range" id="track-opacity" min="0" max="100" value="100" style="width: 100%;">
+                    </div>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="use-line-colors-for-tracks" checked>
+                        路線の色を線路に適用
+                    </label>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>路線グループ</h3>
+                    <div style="margin-bottom: 0.5rem;">
+                        <input type="text" id="group-name-input" placeholder="グループ名を入力..." style="width: calc(100% - 60px); padding: 0.4rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.85rem;">
+                        <button onclick="createGroup()" class="btn-small" style="width: 50px; padding: 0.4rem; font-size: 0.85rem; margin-left: 5px;">作成</button>
+                    </div>
+                    <div id="groups-list" style="max-height: 200px; overflow-y: auto;">
+                        <p class="loading-text" style="font-size: 0.85rem; color: #9ca3af;">グループはありません</p>
+                    </div>
                 </div>
 
                 <div class="sidebar-section">
@@ -102,8 +135,14 @@
                         <p>• +/-ボタン: ズーム</p>
                         <p>• 1:1ボタン: 表示をリセット</p>
                         <p><strong>表示:</strong></p>
-                        <p>• 赤い三角: 通常運行中の列車</p>
-                        <p>• 黄色い三角: 停車中の列車</p>
+                        <p>• 三角形: 列車アイコン（路線の色で表示）</p>
+                        <p>• 黄色の輝き: 停車中の列車</p>
+                        <p><strong>線路設定:</strong></p>
+                        <p>• 線路の色と透明度を調整可能</p>
+                        <p>• 路線ごとの色を線路に適用可能</p>
+                        <p><strong>路線グループ:</strong></p>
+                        <p>• グループ内の路線を1本線で表示</p>
+                        <p>• 複数路線をまとめて管理可能</p>
                         <p><strong>データ更新:</strong></p>
                         <p>• 列車位置: 5秒ごとに自動更新</p>
                         <p>• 駅データ: 2日ごとにエクスポート</p>
