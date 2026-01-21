@@ -49,6 +49,7 @@ async function init() {
         loadStationData(),
         loadTrainData()
     ]);
+    renderDiagram();
 
     // Start auto-update
     setInterval(async () => {
@@ -217,7 +218,7 @@ async function loadStationData() {
 
             updateCompanyFilter();
             updateLineSelector();
-            renderDiagram();
+            // Don't call renderDiagram() here - it's called by the caller
             updateConnectionStatus(true);
         } else {
             console.warn('[Diagram] No station data available in response');
