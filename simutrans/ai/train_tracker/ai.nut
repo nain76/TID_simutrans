@@ -8,10 +8,13 @@
  * 1. Start or load a game
  * 2. Add a new AI player
  * 3. Select "train_tracker" as the AI script
- * 4. The AI will automatically export train data every 3 in-game days
+ * 4. The AI will automatically export:
+ *    - Train position data every 2 in-game days (on days 0, 2, 4, 6, ...)
+ *    - Station data every 4 in-game days (on days 1, 5, 9, 13, ...)
+ *    - Exports are staggered to prevent script timeout issues
  *
  * Author: Claude Code
- * Version: 1.0
+ * Version: 1.1
  */
 
 // Include utility scripts
@@ -119,22 +122,26 @@ function step() {
 /**
  * Main work function - called periodically by step()
  * Exports train data every 2 in-game days, station data every 4 days
- * Only one export per step to avoid timeout
+ * Uses modulo arithmetic to ensure exports never overlap:
+ * - Train exports: days where (day % 2) == 0 (days 0, 2, 4, 6, ...)
+ * - Station exports: days where (day % 4) == 1 (days 1, 5, 9, 13, ...)
+ * This ensures they never run on the same day, preventing timeout issues.
  * Generator function to handle yields properly
  */
 function work() {
     local current_day = get_total_days()
 
-    // Check if train data should be exported (every 2 days)
-    local should_export_train = (persistent.last_train_export_day == -1 ||
-                                 current_day - persistent.last_train_export_day >= config.train_export_interval_days)
+    // Use modulo arithmetic to determine if we should export
+    // Train: export on even days (0, 2, 4, 6, ...)
+    local should_export_train = (current_day % config.train_export_interval_days == 0) &&
+                                (current_day != persistent.last_train_export_day)
 
-    // Check if station data should be exported (every 4 days)
-    local should_export_station = (persistent.last_station_export_day == -1 ||
-                                   current_day - persistent.last_station_export_day >= config.station_export_interval_days)
+    // Station: export on days where (day % 4) == 1 (1, 5, 9, 13, ...)
+    // This ensures station never overlaps with train (which exports on even days)
+    local should_export_station = (current_day % config.station_export_interval_days == 1) &&
+                                  (current_day != persistent.last_station_export_day)
 
     // Export only one type per step to avoid timeout
-    // Train data has priority
     if (should_export_train) {
         export_train_data()
         persistent.last_train_export_day = current_day
