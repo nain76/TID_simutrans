@@ -31,6 +31,9 @@ const LINE_COLORS = [
 let viewBox = { minX: 0, minY: 0, width: 1000, height: 600 };
 let scale = 1;
 let zoomLevel = 1.0;
+let panOffset = { x: 0, y: 0 };
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
 
 /**
  * Initialize the diagram viewer
@@ -104,8 +107,44 @@ function setupEventListeners() {
         e.preventDefault();
         const delta = e.deltaY > 0 ? -0.1 : 0.1;
         zoomLevel = Math.max(0.5, Math.min(3.0, zoomLevel + delta));
-        applyZoom();
+        applyTransform();
     });
+
+    // Mouse pan (drag)
+    svgElement.addEventListener('mousedown', (e) => {
+        // Only pan with left mouse button
+        if (e.button === 0) {
+            isPanning = true;
+            panStart = { x: e.clientX, y: e.clientY };
+            svgElement.style.cursor = 'grabbing';
+        }
+    });
+
+    svgElement.addEventListener('mousemove', (e) => {
+        if (isPanning) {
+            const dx = (e.clientX - panStart.x) / zoomLevel;
+            const dy = (e.clientY - panStart.y) / zoomLevel;
+            panOffset.x += dx;
+            panOffset.y += dy;
+            panStart = { x: e.clientX, y: e.clientY };
+            applyTransform();
+        }
+    });
+
+    svgElement.addEventListener('mouseup', (e) => {
+        if (e.button === 0) {
+            isPanning = false;
+            svgElement.style.cursor = 'grab';
+        }
+    });
+
+    svgElement.addEventListener('mouseleave', () => {
+        isPanning = false;
+        svgElement.style.cursor = 'grab';
+    });
+
+    // Set initial cursor
+    svgElement.style.cursor = 'grab';
 }
 
 /**
@@ -113,7 +152,7 @@ function setupEventListeners() {
  */
 function zoomIn() {
     zoomLevel = Math.min(3.0, zoomLevel + 0.2);
-    applyZoom();
+    applyTransform();
 }
 
 /**
@@ -121,26 +160,26 @@ function zoomIn() {
  */
 function zoomOut() {
     zoomLevel = Math.max(0.5, zoomLevel - 0.2);
-    applyZoom();
+    applyTransform();
 }
 
 /**
- * Reset zoom to 100%
+ * Reset zoom to 100% and center view
  */
 function resetZoom() {
     zoomLevel = 1.0;
-    applyZoom();
+    panOffset = { x: 0, y: 0 };
+    applyTransform();
 }
 
 /**
- * Apply zoom level to SVG
+ * Apply zoom and pan transform to SVG
  */
-function applyZoom() {
-    const svgElement = document.getElementById('railroad-diagram');
+function applyTransform() {
     const content = document.getElementById('diagram-content');
 
     if (content) {
-        content.setAttribute('transform', `scale(${zoomLevel})`);
+        content.setAttribute('transform', `translate(${panOffset.x}, ${panOffset.y}) scale(${zoomLevel})`);
     }
 
     // Update zoom level display
