@@ -831,15 +831,9 @@ function renderDiagram() {
 
             // Get waypoints for this segment (if any) and convert from relative to absolute coordinates
             const relativeWaypoints = segmentWaypoints.get(segmentKey) || [];
-            const waypoints = relativeWaypoints.map(rel => {
-                // Check if already in absolute format (for backward compatibility) or relative format
-                if (rel.t !== undefined && rel.offset !== undefined) {
-                    return relativeToAbsolute(rel, segment.s1, segment.s2);
-                } else {
-                    // Legacy absolute format - convert to relative and back (will be updated on next drag)
-                    return { x: rel.x, y: rel.y };
-                }
-            });
+            const waypoints = relativeWaypoints
+                .filter(rel => rel.t !== undefined && rel.offset !== undefined) // Only use relative format
+                .map(rel => relativeToAbsolute(rel, segment.s1, segment.s2));
 
             // Build the path through all waypoints
             const points = [
@@ -1031,14 +1025,10 @@ function snapToTrack(trainPos, svgStations, lineSegments) {
     if (lineSegments && lineSegments.length > 0) {
         lineSegments.forEach(seg => {
             const relativeWaypoints = segmentWaypoints.get(seg.segmentKey) || [];
-            // Convert from relative to absolute coordinates
-            const waypoints = relativeWaypoints.map(rel => {
-                if (rel.t !== undefined && rel.offset !== undefined) {
-                    return relativeToAbsolute(rel, seg.s1, seg.s2);
-                } else {
-                    return { x: rel.x, y: rel.y };
-                }
-            });
+            // Convert from relative to absolute coordinates (only use relative format)
+            const waypoints = relativeWaypoints
+                .filter(rel => rel.t !== undefined && rel.offset !== undefined)
+                .map(rel => relativeToAbsolute(rel, seg.s1, seg.s2));
             const points = [
                 { x: seg.s1.svgX, y: seg.s1.svgY },
                 ...waypoints,
@@ -2006,14 +1996,10 @@ function findNearestSegment(x, y, segments) {
     segments.forEach((segment, segmentKey) => {
         const relativeWaypoints = segmentWaypoints.get(segmentKey) || [];
 
-        // Convert waypoints from relative to absolute coordinates
-        const waypoints = relativeWaypoints.map(rel => {
-            if (rel.t !== undefined && rel.offset !== undefined) {
-                return relativeToAbsolute(rel, segment.s1, segment.s2);
-            } else {
-                return { x: rel.x, y: rel.y };
-            }
-        });
+        // Convert waypoints from relative to absolute coordinates (only use relative format)
+        const waypoints = relativeWaypoints
+            .filter(rel => rel.t !== undefined && rel.offset !== undefined)
+            .map(rel => relativeToAbsolute(rel, segment.s1, segment.s2));
 
         // Build the path through all waypoints
         const points = [
