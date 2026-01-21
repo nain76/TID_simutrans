@@ -471,9 +471,9 @@ function renderDiagram() {
                 svgY: pos.y
             };
 
-            // Track unique stations by SVG coordinate key (rounded to avoid floating point issues)
-            // Use SVG coordinates instead of game coordinates to avoid visual duplicates
-            const key = `${Math.round(pos.x)},${Math.round(pos.y)}`;
+            // Track unique stations by game coordinate key (rounded to avoid floating point issues)
+            // Use game coordinates to ensure the same physical station is only rendered once
+            const key = `${Math.round(station.x)},${Math.round(station.y)}`;
             if (!uniqueStations.has(key)) {
                 uniqueStations.set(key, svgStation);
             }
@@ -486,9 +486,9 @@ function renderDiagram() {
             const s1 = svgStations[i];
             const s2 = svgStations[i + 1];
 
-            // Create a unique key for this segment (order-independent, using SVG coordinates)
-            const key1 = `${Math.round(s1.svgX)},${Math.round(s1.svgY)}`;
-            const key2 = `${Math.round(s2.svgX)},${Math.round(s2.svgY)}`;
+            // Create a unique key for this segment (order-independent, using game coordinates)
+            const key1 = `${Math.round(s1.x)},${Math.round(s1.y)}`;
+            const key2 = `${Math.round(s2.x)},${Math.round(s2.y)}`;
             const segmentKey = key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
 
             // Store segment if not already stored
