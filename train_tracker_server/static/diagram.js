@@ -647,11 +647,12 @@ function renderDiagram() {
                     return svgStation;
                 });
 
-                // Store line data for train rendering
+                // Store line data for train rendering (segments will be added later)
                 groupLinesData.push({
                     line: line,
                     svgStations: svgStations,
-                    color: color
+                    color: color,
+                    lineSegments: [] // Will be filled with group segments
                 });
             }
         });
@@ -723,6 +724,18 @@ function renderDiagram() {
             uniqueSegments.set(key, segment);
         });
 
+        // Convert groupSegments to array for train snapping
+        const groupSegmentsArray = Array.from(groupSegments.entries()).map(([key, seg]) => ({
+            segmentKey: key,
+            s1: seg.s1,
+            s2: seg.s2
+        }));
+
+        // Add segments to each line in the group
+        groupLinesData.forEach(ld => {
+            ld.lineSegments = groupSegmentsArray;
+        });
+
         // Add group lines data to main linesData
         linesData.push(...groupLinesData);
         processedGroups.add(group.name);
@@ -775,6 +788,7 @@ function renderDiagram() {
         });
 
         // Extract track segments from this ungrouped line
+        const lineSegmentsArray = [];
         for (let i = 0; i < svgStations.length - 1; i++) {
             const s1 = svgStations[i];
             const s2 = svgStations[i + 1];
@@ -790,13 +804,19 @@ function renderDiagram() {
                 color: color,
                 group: null
             });
+            lineSegmentsArray.push({
+                segmentKey: segmentKey,
+                s1: s1,
+                s2: s2
+            });
         }
 
         // Store line data for train rendering
         linesData.push({
             line: line,
             svgStations: svgStations,
-            color: color
+            color: color,
+            lineSegments: lineSegmentsArray
         });
     });
 
@@ -807,8 +827,17 @@ function renderDiagram() {
         uniqueSegments.forEach((segment, segmentKey) => {
             const trackColor = displaySettings.useLineColorsForTracks ? segment.color : displaySettings.trackColor;
 
-            // Get waypoints for this segment (if any)
-            const waypoints = segmentWaypoints.get(segmentKey) || [];
+            // Get waypoints for this segment (if any) and convert from relative to absolute coordinates
+            const relativeWaypoints = segmentWaypoints.get(segmentKey) || [];
+            const waypoints = relativeWaypoints.map(rel => {
+                // Check if already in absolute format (for backward compatibility) or relative format
+                if (rel.t !== undefined && rel.offset !== undefined) {
+                    return relativeToAbsolute(rel, segment.s1, segment.s2);
+                } else {
+                    // Legacy absolute format - convert to relative and back (will be updated on next drag)
+                    return { x: rel.x, y: rel.y };
+                }
+            });
 
             // Build the path through all waypoints
             const points = [
@@ -860,7 +889,7 @@ function renderDiagram() {
             lineTrains.forEach(train => {
                 // Use train name as unique key to prevent duplicates
                 if (!uniqueTrains.has(train.name)) {
-                    const trainSvg = renderTrain(train, bounds, lineData.color, lineData.svgStations);
+                    const trainSvg = renderTrain(train, bounds, lineData.color, lineData.svgStations, lineData.lineSegments);
                     if (trainSvg) {
                         uniqueTrains.set(train.name, true);
                         visibleTrains++;
@@ -928,10 +957,66 @@ function nearestPointOnSegment(px, py, x1, y1, x2, y2) {
 }
 
 /**
- * Find nearest point on track (any segment of the line)
+ * Convert absolute waypoint coordinates to relative coordinates (t, offset)
+ * t: position along the segment (0=s1, 1=s2)
+ * offset: perpendicular distance from the segment
+ */
+function absoluteToRelative(wp, s1, s2) {
+    const dx = s2.svgX - s1.svgX;
+    const dy = s2.svgY - s1.svgY;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared === 0) {
+        return { t: 0, offset: 0 };
+    }
+
+    const length = Math.sqrt(lengthSquared);
+
+    // Vector from s1 to wp
+    const wx = wp.x - s1.svgX;
+    const wy = wp.y - s1.svgY;
+
+    // t = projection of wp onto segment line
+    const t = (wx * dx + wy * dy) / lengthSquared;
+
+    // offset = perpendicular distance (positive = left side when going s1->s2)
+    const offset = (wx * (-dy) + wy * dx) / length;
+
+    return { t, offset };
+}
+
+/**
+ * Convert relative waypoint coordinates back to absolute coordinates
+ */
+function relativeToAbsolute(rel, s1, s2) {
+    const dx = s2.svgX - s1.svgX;
+    const dy = s2.svgY - s1.svgY;
+    const length = Math.sqrt(dx * dx + dy * dy);
+
+    if (length === 0) {
+        return { x: s1.svgX, y: s1.svgY };
+    }
+
+    // Unit vectors
+    const ux = dx / length;
+    const uy = dy / length;
+
+    // Perpendicular unit vector (90 degrees counterclockwise)
+    const px = -uy;
+    const py = ux;
+
+    // Calculate absolute position
+    const x = s1.svgX + rel.t * dx + rel.offset * px;
+    const y = s1.svgY + rel.t * dy + rel.offset * py;
+
+    return { x, y };
+}
+
+/**
+ * Find nearest point on track (any segment of the line, including waypoints)
  * Returns both the point and the segment direction
  */
-function snapToTrack(trainPos, svgStations) {
+function snapToTrack(trainPos, svgStations, lineSegments) {
     if (!svgStations || svgStations.length < 2) {
         return { point: trainPos, angle: 0 };
     }
@@ -940,19 +1025,52 @@ function snapToTrack(trainPos, svgStations) {
     let nearest = trainPos;
     let segmentAngle = 0;
 
-    // Check all segments of the track
-    for (let i = 0; i < svgStations.length - 1; i++) {
-        const s1 = svgStations[i];
-        const s2 = svgStations[i + 1];
+    // If lineSegments with waypoints are provided, use them
+    if (lineSegments && lineSegments.length > 0) {
+        lineSegments.forEach(seg => {
+            const relativeWaypoints = segmentWaypoints.get(seg.segmentKey) || [];
+            // Convert from relative to absolute coordinates
+            const waypoints = relativeWaypoints.map(rel => {
+                if (rel.t !== undefined && rel.offset !== undefined) {
+                    return relativeToAbsolute(rel, seg.s1, seg.s2);
+                } else {
+                    return { x: rel.x, y: rel.y };
+                }
+            });
+            const points = [
+                { x: seg.s1.svgX, y: seg.s1.svgY },
+                ...waypoints,
+                { x: seg.s2.svgX, y: seg.s2.svgY }
+            ];
 
-        const point = nearestPointOnSegment(trainPos.x, trainPos.y, s1.svgX, s1.svgY, s2.svgX, s2.svgY);
-        const dist = Math.sqrt(Math.pow(point.x - trainPos.x, 2) + Math.pow(point.y - trainPos.y, 2));
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
 
-        if (dist < minDist) {
-            minDist = dist;
-            nearest = point;
-            // Calculate angle of this segment (in degrees)
-            segmentAngle = Math.atan2(s2.svgY - s1.svgY, s2.svgX - s1.svgX) * 180 / Math.PI;
+                const point = nearestPointOnSegment(trainPos.x, trainPos.y, p1.x, p1.y, p2.x, p2.y);
+                const dist = Math.sqrt(Math.pow(point.x - trainPos.x, 2) + Math.pow(point.y - trainPos.y, 2));
+
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearest = point;
+                    segmentAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI;
+                }
+            }
+        });
+    } else {
+        // Fallback: use direct station-to-station segments
+        for (let i = 0; i < svgStations.length - 1; i++) {
+            const s1 = svgStations[i];
+            const s2 = svgStations[i + 1];
+
+            const point = nearestPointOnSegment(trainPos.x, trainPos.y, s1.svgX, s1.svgY, s2.svgX, s2.svgY);
+            const dist = Math.sqrt(Math.pow(point.x - trainPos.x, 2) + Math.pow(point.y - trainPos.y, 2));
+
+            if (dist < minDist) {
+                minDist = dist;
+                nearest = point;
+                segmentAngle = Math.atan2(s2.svgY - s1.svgY, s2.svgX - s1.svgX) * 180 / Math.PI;
+            }
         }
     }
 
@@ -963,14 +1081,14 @@ function snapToTrack(trainPos, svgStations) {
  * Render train at actual game position, snapped to track
  * Trains are rendered as directional triangles
  */
-function renderTrain(train, bounds, color, svgStations) {
+function renderTrain(train, bounds, color, svgStations, lineSegments) {
     if (!train.position) return '';
 
     // Convert train position to SVG coordinates
     let trainSvgPos = gameToSVG(train.position.x, train.position.y, bounds);
 
-    // Snap to nearest point on track and get direction
-    const snapResult = snapToTrack(trainSvgPos, svgStations);
+    // Snap to nearest point on track and get direction (including waypoints)
+    const snapResult = snapToTrack(trainSvgPos, svgStations, lineSegments);
     const pos = snapResult.point;
     const angle = snapResult.angle;
 
@@ -1602,15 +1720,92 @@ function handleWaypointDrag(e) {
         finalPos = svgPos;
     }
 
-    // Update waypoint position
+    // Find the segment data to convert to relative coordinates
+    const segmentData = getSegmentData(draggedWaypoint.segmentKey, linesToRender, stationMidpoints, bounds);
+
+    // Update waypoint position (convert to relative coordinates)
     const waypoints = segmentWaypoints.get(draggedWaypoint.segmentKey) || [];
     if (draggedWaypoint.waypointIndex < waypoints.length) {
-        waypoints[draggedWaypoint.waypointIndex] = finalPos;
+        if (segmentData) {
+            // Save as relative coordinates
+            const relativePos = absoluteToRelative(finalPos, segmentData.s1, segmentData.s2);
+            waypoints[draggedWaypoint.waypointIndex] = relativePos;
+        } else {
+            // Fallback to absolute coordinates if segment not found
+            waypoints[draggedWaypoint.waypointIndex] = finalPos;
+        }
         segmentWaypoints.set(draggedWaypoint.segmentKey, waypoints);
     }
 
     // Re-render to show updated position
     renderDiagram();
+}
+
+/**
+ * Get segment data by segment key
+ */
+function getSegmentData(segmentKey, linesToRender, stationMidpoints, bounds) {
+    // Parse segment key to find the segment
+    // Group segments: "groupName:stationA-stationB"
+    // Ungrouped segments: "lineName:index"
+
+    // Build line to group map
+    const lineToGroup = new Map();
+    lineGroups.forEach(group => {
+        group.lines.forEach(lineName => {
+            lineToGroup.set(lineName, group.name);
+        });
+    });
+
+    // Check if it's a group segment
+    const colonIndex = segmentKey.indexOf(':');
+    if (colonIndex === -1) return null;
+
+    const prefix = segmentKey.substring(0, colonIndex);
+    const suffix = segmentKey.substring(colonIndex + 1);
+
+    // Check if prefix is a group name
+    const group = lineGroups.find(g => g.name === prefix);
+    if (group) {
+        // It's a group segment: "groupName:stationA-stationB"
+        const dashIndex = suffix.indexOf('-');
+        if (dashIndex === -1) return null;
+
+        const stationA = suffix.substring(0, dashIndex);
+        const stationB = suffix.substring(dashIndex + 1);
+
+        const s1Data = stationMidpoints.get(stationA);
+        const s2Data = stationMidpoints.get(stationB);
+
+        if (s1Data && s2Data) {
+            return { s1: s1Data, s2: s2Data };
+        }
+    } else {
+        // It's an ungrouped segment: "lineName:index"
+        const lineIndex = parseInt(suffix);
+        if (isNaN(lineIndex)) return null;
+
+        const line = linesToRender.find(l => l.name === prefix);
+        if (!line) return null;
+
+        // Get stations for this line
+        const lineStations = [];
+        const seenNames = new Set();
+        line.stations.forEach(station => {
+            if (seenNames.has(station.name)) return;
+            seenNames.add(station.name);
+            const midpoint = stationMidpoints.get(station.name);
+            if (midpoint) {
+                lineStations.push(midpoint);
+            }
+        });
+
+        if (lineIndex >= 0 && lineIndex < lineStations.length - 1) {
+            return { s1: lineStations[lineIndex], s2: lineStations[lineIndex + 1] };
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -1639,153 +1834,15 @@ function removeWaypoint(segmentKey, waypointIndex) {
 }
 
 /**
- * Reset all waypoints to initial state (one waypoint at midpoint of each segment)
+ * Reset all waypoints to initial state (clear all waypoints to show midpoint handles)
  */
 function resetAllWaypoints() {
     if (!confirm('すべてのドラッグポイントをリセットしますか?')) {
         return;
     }
 
-    if (!stationData || selectedLines.size === 0) {
-        alert('路線を選択してください');
-        return;
-    }
-
-    const linesToRender = stationData.lines.filter(line => selectedLines.has(line.name));
-    if (linesToRender.length === 0) {
-        alert('路線を選択してください');
-        return;
-    }
-
-    const bounds = calculateBounds(linesToRender);
-
     // Clear all existing waypoints
     segmentWaypoints.clear();
-
-    // Rebuild segment data (same logic as renderDiagram)
-    const stationsByName = new Map();
-    linesToRender.forEach(line => {
-        line.stations.forEach(station => {
-            if (!stationsByName.has(station.name)) {
-                stationsByName.set(station.name, []);
-            }
-            stationsByName.get(station.name).push({
-                x: station.x,
-                y: station.y,
-                name: station.name
-            });
-        });
-    });
-
-    const stationMidpoints = new Map();
-    stationsByName.forEach((positions, stationName) => {
-        const avgX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
-        const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
-        stationMidpoints.set(stationName, { name: stationName, x: avgX, y: avgY });
-    });
-
-    const allSegments = new Map();
-
-    // Build line to group map
-    const lineToGroup = new Map();
-    lineGroups.forEach(group => {
-        group.lines.forEach(lineName => {
-            lineToGroup.set(lineName, group.name);
-        });
-    });
-
-    // Process groups
-    lineGroups.forEach((group, groupIndex) => {
-        const color = LINE_COLORS[groupIndex % LINE_COLORS.length];
-        const groupSegments = new Map();
-
-        linesToRender.forEach(line => {
-            if (group.lines.has(line.name)) {
-                const lineStations = [];
-                const seenNames = new Set();
-
-                line.stations.forEach(station => {
-                    if (seenNames.has(station.name)) return;
-                    seenNames.add(station.name);
-
-                    const midpoint = stationMidpoints.get(station.name);
-                    if (midpoint) {
-                        const pos = gameToSVG(midpoint.x, midpoint.y, bounds);
-                        lineStations.push({
-                            ...midpoint,
-                            svgX: pos.x,
-                            svgY: pos.y
-                        });
-                    }
-                });
-
-                for (let i = 0; i < lineStations.length - 1; i++) {
-                    const s1 = lineStations[i];
-                    const s2 = lineStations[i + 1];
-
-                    if (s1.name === s2.name) continue;
-
-                    const segmentNames = [s1.name, s2.name].sort();
-                    const normalizedKey = `${group.name}:${segmentNames[0]}-${segmentNames[1]}`;
-
-                    if (!groupSegments.has(normalizedKey)) {
-                        groupSegments.set(normalizedKey, { s1: s1, s2: s2 });
-                    }
-                }
-            }
-        });
-
-        groupSegments.forEach((segment, key) => {
-            allSegments.set(key, segment);
-        });
-    });
-
-    // Process ungrouped lines
-    linesToRender.forEach((line, lineIndex) => {
-        if (lineToGroup.has(line.name)) return;
-
-        const stations = line.stations;
-        if (!stations || stations.length === 0) return;
-
-        const processedStations = [];
-        const seenNames = new Set();
-
-        stations.forEach(station => {
-            if (seenNames.has(station.name)) return;
-            seenNames.add(station.name);
-
-            const midpoint = stationMidpoints.get(station.name);
-            if (midpoint) {
-                processedStations.push(midpoint);
-            }
-        });
-
-        const svgStations = processedStations.map(station => {
-            const pos = gameToSVG(station.x, station.y, bounds);
-            return {
-                ...station,
-                svgX: pos.x,
-                svgY: pos.y
-            };
-        });
-
-        for (let i = 0; i < svgStations.length - 1; i++) {
-            const s1 = svgStations[i];
-            const s2 = svgStations[i + 1];
-
-            if (s1.name === s2.name) continue;
-
-            const segmentKey = `${line.name}:${i}`;
-            allSegments.set(segmentKey, { s1: s1, s2: s2 });
-        }
-    });
-
-    // Add one waypoint at the midpoint of each segment
-    allSegments.forEach((segment, segmentKey) => {
-        const midX = (segment.s1.svgX + segment.s2.svgX) / 2;
-        const midY = (segment.s1.svgY + segment.s2.svgY) / 2;
-        segmentWaypoints.set(segmentKey, [{ x: midX, y: midY }]);
-    });
 
     saveWaypoints();
     renderDiagram();
@@ -1796,9 +1853,9 @@ function resetAllWaypoints() {
  * Start dragging a new waypoint from midpoint
  */
 function startMidpointDrag(segmentKey, midX, midY) {
-    // Create a new waypoint at the midpoint
+    // Create a new waypoint at the midpoint (t=0.5, offset=0 in relative coordinates)
     const waypoints = segmentWaypoints.get(segmentKey) || [];
-    waypoints.push({ x: midX, y: midY });
+    waypoints.push({ t: 0.5, offset: 0 });
     segmentWaypoints.set(segmentKey, waypoints);
 
     // Start dragging the new waypoint
@@ -1948,9 +2005,17 @@ function handleRightClick(e) {
     if (result && result.distance < 30) { // Within 30 pixels
         const { segmentKey, nearestPoint } = result;
 
-        // Add waypoint at the nearest point
+        // Get segment data for conversion to relative coordinates
+        const segment = allSegments.get(segmentKey);
+
+        // Add waypoint at the nearest point (convert to relative coordinates)
         const waypoints = segmentWaypoints.get(segmentKey) || [];
-        waypoints.push(nearestPoint);
+        if (segment) {
+            const relativePos = absoluteToRelative(nearestPoint, segment.s1, segment.s2);
+            waypoints.push(relativePos);
+        } else {
+            waypoints.push(nearestPoint); // Fallback
+        }
         segmentWaypoints.set(segmentKey, waypoints);
 
         // Start dragging the new waypoint
@@ -1970,7 +2035,16 @@ function findNearestSegment(x, y, segments) {
     let result = null;
 
     segments.forEach((segment, segmentKey) => {
-        const waypoints = segmentWaypoints.get(segmentKey) || [];
+        const relativeWaypoints = segmentWaypoints.get(segmentKey) || [];
+
+        // Convert waypoints from relative to absolute coordinates
+        const waypoints = relativeWaypoints.map(rel => {
+            if (rel.t !== undefined && rel.offset !== undefined) {
+                return relativeToAbsolute(rel, segment.s1, segment.s2);
+            } else {
+                return { x: rel.x, y: rel.y };
+            }
+        });
 
         // Build the path through all waypoints
         const points = [
