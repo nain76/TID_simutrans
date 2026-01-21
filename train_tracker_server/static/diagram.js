@@ -53,8 +53,12 @@ let snapDistance = 20; // Distance in pixels to snap to a station
 async function init() {
     console.log('Initializing diagram viewer...');
 
-    // Load line groups from localStorage
+    // Load line groups and waypoints from localStorage
     loadLineGroups();
+    loadWaypoints();
+
+    // Load profiles list
+    updateProfilesList();
 
     // Setup event listeners
     setupEventListeners();
@@ -204,6 +208,7 @@ function setupEventListeners() {
             if (isDraggingWaypoint) {
                 isDraggingWaypoint = false;
                 draggedWaypoint = null;
+                saveWaypoints(); // Save waypoints after dragging
                 renderDiagram();
             }
             isPanning = false;
@@ -215,6 +220,7 @@ function setupEventListeners() {
         if (isDraggingWaypoint) {
             isDraggingWaypoint = false;
             draggedWaypoint = null;
+            saveWaypoints(); // Save waypoints after dragging
             renderDiagram();
         }
         isPanning = false;
@@ -225,6 +231,16 @@ function setupEventListeners() {
     svgElement.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         handleRightClick(e);
+    });
+
+    // Double-click to remove waypoint
+    svgElement.addEventListener('dblclick', (e) => {
+        if (e.target.classList.contains('waypoint-handle')) {
+            e.preventDefault();
+            const segmentKey = e.target.getAttribute('data-segment-key');
+            const waypointIndex = parseInt(e.target.getAttribute('data-waypoint-index'));
+            removeWaypoint(segmentKey, waypointIndex);
+        }
     });
 
     // Set initial cursor
@@ -1087,6 +1103,251 @@ function loadLineGroups() {
 }
 
 /**
+ * Save waypoints to localStorage
+ */
+function saveWaypoints() {
+    try {
+        const serialized = Array.from(segmentWaypoints.entries()).map(([key, waypoints]) => ({
+            key: key,
+            waypoints: waypoints
+        }));
+        localStorage.setItem('segmentWaypoints', JSON.stringify(serialized));
+        console.log('[Diagram] Waypoints saved to localStorage');
+    } catch (e) {
+        console.warn('[Diagram] Failed to save waypoints:', e);
+    }
+}
+
+/**
+ * Load waypoints from localStorage
+ */
+function loadWaypoints() {
+    try {
+        const saved = localStorage.getItem('segmentWaypoints');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            segmentWaypoints = new Map(parsed.map(item => [item.key, item.waypoints]));
+            console.log('[Diagram] Waypoints loaded from localStorage:', segmentWaypoints.size);
+        } else {
+            segmentWaypoints = new Map();
+        }
+    } catch (e) {
+        console.warn('[Diagram] Failed to load waypoints:', e);
+        segmentWaypoints = new Map();
+    }
+}
+
+/**
+ * Save current state as a profile
+ */
+function saveProfile() {
+    const input = document.getElementById('profile-name-input');
+    const profileName = input.value.trim();
+
+    if (!profileName) {
+        alert('プロファイル名を入力してください');
+        return;
+    }
+
+    // Collect current state
+    const profile = {
+        name: profileName,
+        timestamp: new Date().toISOString(),
+        selectedLines: Array.from(selectedLines),
+        displaySettings: {
+            showTracks: displaySettings.showTracks,
+            showStationNames: displaySettings.showStationNames,
+            showTrainNames: displaySettings.showTrainNames,
+            showSpeeds: displaySettings.showSpeeds,
+            trackColor: displaySettings.trackColor,
+            trackOpacity: displaySettings.trackOpacity,
+            useLineColorsForTracks: displaySettings.useLineColorsForTracks,
+            useLineColorsForTrains: displaySettings.useLineColorsForTrains
+        },
+        lineGroups: lineGroups.map(group => ({
+            name: group.name,
+            lines: Array.from(group.lines)
+        })),
+        segmentWaypoints: Array.from(segmentWaypoints.entries()).map(([key, waypoints]) => ({
+            key: key,
+            waypoints: waypoints
+        }))
+    };
+
+    // Get existing profiles
+    let profiles = [];
+    try {
+        const saved = localStorage.getItem('diagramProfiles');
+        if (saved) {
+            profiles = JSON.parse(saved);
+        }
+    } catch (e) {
+        console.warn('[Diagram] Failed to load existing profiles:', e);
+    }
+
+    // Check if profile with same name exists
+    const existingIndex = profiles.findIndex(p => p.name === profileName);
+    if (existingIndex >= 0) {
+        if (!confirm(`プロファイル「${profileName}」は既に存在します。上書きしますか?`)) {
+            return;
+        }
+        profiles[existingIndex] = profile;
+    } else {
+        profiles.push(profile);
+    }
+
+    // Save to localStorage
+    try {
+        localStorage.setItem('diagramProfiles', JSON.stringify(profiles));
+        console.log('[Diagram] Profile saved:', profileName);
+        input.value = '';
+        updateProfilesList();
+        alert(`プロファイル「${profileName}」を保存しました`);
+    } catch (e) {
+        console.error('[Diagram] Failed to save profile:', e);
+        alert('プロファイルの保存に失敗しました');
+    }
+}
+
+/**
+ * Load a profile
+ */
+function loadProfile(profileName) {
+    try {
+        const saved = localStorage.getItem('diagramProfiles');
+        if (!saved) {
+            alert('プロファイルが見つかりません');
+            return;
+        }
+
+        const profiles = JSON.parse(saved);
+        const profile = profiles.find(p => p.name === profileName);
+
+        if (!profile) {
+            alert('プロファイルが見つかりません');
+            return;
+        }
+
+        // Restore state
+        selectedLines = new Set(profile.selectedLines || []);
+
+        displaySettings = {
+            showTracks: profile.displaySettings.showTracks,
+            showStationNames: profile.displaySettings.showStationNames,
+            showTrainNames: profile.displaySettings.showTrainNames,
+            showSpeeds: profile.displaySettings.showSpeeds,
+            trackColor: profile.displaySettings.trackColor,
+            trackOpacity: profile.displaySettings.trackOpacity,
+            useLineColorsForTracks: profile.displaySettings.useLineColorsForTracks,
+            useLineColorsForTrains: profile.displaySettings.useLineColorsForTrains
+        };
+
+        lineGroups = (profile.lineGroups || []).map(group => ({
+            name: group.name,
+            lines: new Set(group.lines)
+        }));
+
+        segmentWaypoints = new Map((profile.segmentWaypoints || []).map(item => [item.key, item.waypoints]));
+
+        // Update UI
+        document.getElementById('show-tracks').checked = displaySettings.showTracks;
+        document.getElementById('show-station-names').checked = displaySettings.showStationNames;
+        document.getElementById('show-train-names').checked = displaySettings.showTrainNames;
+        document.getElementById('show-speeds').checked = displaySettings.showSpeeds;
+        document.getElementById('track-color').value = displaySettings.trackColor;
+        document.getElementById('track-opacity').value = displaySettings.trackOpacity * 100;
+        document.getElementById('track-opacity-value').textContent = `${Math.round(displaySettings.trackOpacity * 100)}%`;
+        document.getElementById('use-line-colors-for-tracks').checked = displaySettings.useLineColorsForTracks;
+        document.getElementById('use-line-colors-for-trains').checked = displaySettings.useLineColorsForTrains;
+
+        // Save to localStorage
+        saveLineGroups();
+        saveWaypoints();
+
+        // Update display
+        updateLineSelector();
+        updateGroupsList();
+        renderDiagram();
+
+        console.log('[Diagram] Profile loaded:', profileName);
+        alert(`プロファイル「${profileName}」を読み込みました`);
+    } catch (e) {
+        console.error('[Diagram] Failed to load profile:', e);
+        alert('プロファイルの読み込みに失敗しました');
+    }
+}
+
+/**
+ * Delete a profile
+ */
+function deleteProfile(profileName) {
+    if (!confirm(`プロファイル「${profileName}」を削除しますか?`)) {
+        return;
+    }
+
+    try {
+        const saved = localStorage.getItem('diagramProfiles');
+        if (!saved) return;
+
+        let profiles = JSON.parse(saved);
+        profiles = profiles.filter(p => p.name !== profileName);
+
+        localStorage.setItem('diagramProfiles', JSON.stringify(profiles));
+        updateProfilesList();
+        console.log('[Diagram] Profile deleted:', profileName);
+        alert(`プロファイル「${profileName}」を削除しました`);
+    } catch (e) {
+        console.error('[Diagram] Failed to delete profile:', e);
+        alert('プロファイルの削除に失敗しました');
+    }
+}
+
+/**
+ * Update profiles list display
+ */
+function updateProfilesList() {
+    const container = document.getElementById('profiles-list');
+
+    try {
+        const saved = localStorage.getItem('diagramProfiles');
+        if (!saved) {
+            container.innerHTML = '<p class="loading-text" style="font-size: 0.85rem; color: #9ca3af;">保存されたプロファイルはありません</p>';
+            return;
+        }
+
+        const profiles = JSON.parse(saved);
+        if (profiles.length === 0) {
+            container.innerHTML = '<p class="loading-text" style="font-size: 0.85rem; color: #9ca3af;">保存されたプロファイルはありません</p>';
+            return;
+        }
+
+        let html = '';
+        profiles.forEach(profile => {
+            const date = new Date(profile.timestamp);
+            const dateStr = date.toLocaleString('ja-JP');
+
+            html += `
+                <div style="border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.4rem; margin-bottom: 0.4rem; background: #f9fafb;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+                        <strong style="font-size: 0.85rem;">${profile.name}</strong>
+                        <div style="display: flex; gap: 0.3rem;">
+                            <button onclick="loadProfile('${profile.name.replace(/'/g, "\\'")}')" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; background: #3b82f6; color: white; border: none; border-radius: 3px; cursor: pointer;">読込</button>
+                            <button onclick="deleteProfile('${profile.name.replace(/'/g, "\\'")}')" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; background: #ef4444; color: white; border: none; border-radius: 3px; cursor: pointer;">削除</button>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.7rem; color: #6b7280;">${dateStr}</div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+    } catch (e) {
+        console.error('[Diagram] Failed to update profiles list:', e);
+        container.innerHTML = '<p class="loading-text" style="font-size: 0.85rem; color: #9ca3af;">エラーが発生しました</p>';
+    }
+}
+
+/**
  * Create a new line group
  */
 function createGroup() {
@@ -1361,6 +1622,177 @@ function startWaypointDrag(segmentKey, waypointIndex) {
 }
 
 /**
+ * Remove a waypoint from a segment
+ */
+function removeWaypoint(segmentKey, waypointIndex) {
+    const waypoints = segmentWaypoints.get(segmentKey);
+    if (waypoints && waypointIndex >= 0 && waypointIndex < waypoints.length) {
+        waypoints.splice(waypointIndex, 1);
+        if (waypoints.length === 0) {
+            segmentWaypoints.delete(segmentKey);
+        } else {
+            segmentWaypoints.set(segmentKey, waypoints);
+        }
+        saveWaypoints();
+        renderDiagram();
+    }
+}
+
+/**
+ * Reset all waypoints to initial state (one waypoint at midpoint of each segment)
+ */
+function resetAllWaypoints() {
+    if (!confirm('すべてのドラッグポイントをリセットしますか?')) {
+        return;
+    }
+
+    if (!stationData || selectedLines.size === 0) {
+        alert('路線を選択してください');
+        return;
+    }
+
+    const linesToRender = stationData.lines.filter(line => selectedLines.has(line.name));
+    if (linesToRender.length === 0) {
+        alert('路線を選択してください');
+        return;
+    }
+
+    const bounds = calculateBounds(linesToRender);
+
+    // Clear all existing waypoints
+    segmentWaypoints.clear();
+
+    // Rebuild segment data (same logic as renderDiagram)
+    const stationsByName = new Map();
+    linesToRender.forEach(line => {
+        line.stations.forEach(station => {
+            if (!stationsByName.has(station.name)) {
+                stationsByName.set(station.name, []);
+            }
+            stationsByName.get(station.name).push({
+                x: station.x,
+                y: station.y,
+                name: station.name
+            });
+        });
+    });
+
+    const stationMidpoints = new Map();
+    stationsByName.forEach((positions, stationName) => {
+        const avgX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
+        const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
+        stationMidpoints.set(stationName, { name: stationName, x: avgX, y: avgY });
+    });
+
+    const allSegments = new Map();
+
+    // Build line to group map
+    const lineToGroup = new Map();
+    lineGroups.forEach(group => {
+        group.lines.forEach(lineName => {
+            lineToGroup.set(lineName, group.name);
+        });
+    });
+
+    // Process groups
+    lineGroups.forEach((group, groupIndex) => {
+        const color = LINE_COLORS[groupIndex % LINE_COLORS.length];
+        const groupSegments = new Map();
+
+        linesToRender.forEach(line => {
+            if (group.lines.has(line.name)) {
+                const lineStations = [];
+                const seenNames = new Set();
+
+                line.stations.forEach(station => {
+                    if (seenNames.has(station.name)) return;
+                    seenNames.add(station.name);
+
+                    const midpoint = stationMidpoints.get(station.name);
+                    if (midpoint) {
+                        const pos = gameToSVG(midpoint.x, midpoint.y, bounds);
+                        lineStations.push({
+                            ...midpoint,
+                            svgX: pos.x,
+                            svgY: pos.y
+                        });
+                    }
+                });
+
+                for (let i = 0; i < lineStations.length - 1; i++) {
+                    const s1 = lineStations[i];
+                    const s2 = lineStations[i + 1];
+
+                    if (s1.name === s2.name) continue;
+
+                    const segmentNames = [s1.name, s2.name].sort();
+                    const normalizedKey = `${group.name}:${segmentNames[0]}-${segmentNames[1]}`;
+
+                    if (!groupSegments.has(normalizedKey)) {
+                        groupSegments.set(normalizedKey, { s1: s1, s2: s2 });
+                    }
+                }
+            }
+        });
+
+        groupSegments.forEach((segment, key) => {
+            allSegments.set(key, segment);
+        });
+    });
+
+    // Process ungrouped lines
+    linesToRender.forEach((line, lineIndex) => {
+        if (lineToGroup.has(line.name)) return;
+
+        const stations = line.stations;
+        if (!stations || stations.length === 0) return;
+
+        const processedStations = [];
+        const seenNames = new Set();
+
+        stations.forEach(station => {
+            if (seenNames.has(station.name)) return;
+            seenNames.add(station.name);
+
+            const midpoint = stationMidpoints.get(station.name);
+            if (midpoint) {
+                processedStations.push(midpoint);
+            }
+        });
+
+        const svgStations = processedStations.map(station => {
+            const pos = gameToSVG(station.x, station.y, bounds);
+            return {
+                ...station,
+                svgX: pos.x,
+                svgY: pos.y
+            };
+        });
+
+        for (let i = 0; i < svgStations.length - 1; i++) {
+            const s1 = svgStations[i];
+            const s2 = svgStations[i + 1];
+
+            if (s1.name === s2.name) continue;
+
+            const segmentKey = `${line.name}:${i}`;
+            allSegments.set(segmentKey, { s1: s1, s2: s2 });
+        }
+    });
+
+    // Add one waypoint at the midpoint of each segment
+    allSegments.forEach((segment, segmentKey) => {
+        const midX = (segment.s1.svgX + segment.s2.svgX) / 2;
+        const midY = (segment.s1.svgY + segment.s2.svgY) / 2;
+        segmentWaypoints.set(segmentKey, [{ x: midX, y: midY }]);
+    });
+
+    saveWaypoints();
+    renderDiagram();
+    alert('ドラッグポイントをリセットしました');
+}
+
+/**
  * Start dragging a new waypoint from midpoint
  */
 function startMidpointDrag(segmentKey, midX, midY) {
@@ -1383,6 +1815,7 @@ function handleRightClick(e) {
     // Build current segments map
     if (!stationData || selectedLines.size === 0) return;
 
+    // Only allow adding waypoints to visible (selected) lines
     const linesToRender = stationData.lines.filter(line => selectedLines.has(line.name));
     if (linesToRender.length === 0) return;
 
@@ -1524,6 +1957,7 @@ function handleRightClick(e) {
         isDraggingWaypoint = true;
         draggedWaypoint = { segmentKey, waypointIndex: waypoints.length - 1 };
 
+        saveWaypoints(); // Save waypoints after adding
         renderDiagram();
     }
 }
