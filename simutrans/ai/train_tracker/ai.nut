@@ -214,9 +214,17 @@ function export_train_data() {
             trains.append(train_data)
         }
 
-        // Build JSON
+        // Build JSON with chunked processing
         local game_time = world.get_time()
-        local json_string = build_train_json(trains, game_time)
+        local builder = create_json_builder()
+
+        // Consume the generator to build JSON (with yields)
+        foreach (dummy in build_train_json_chunked(trains, game_time, builder)) {
+            // Yields happen here automatically
+        }
+
+        // Get final JSON string
+        local json_string = json_builder_result(builder)
 
         // Write to file
         write_json_file(json_string)
@@ -335,8 +343,16 @@ function export_station_data() {
 
         debug_log("export_station_data: processed=" + processed + " total_lines=" + lines_data.len())
 
-        // Build JSON and write to file
-        local json_string = build_station_json(lines_data)
+        // Build JSON with chunked processing
+        local builder = create_json_builder()
+
+        // Consume the generator to build JSON (with yields)
+        foreach (dummy in build_station_json_chunked(lines_data, builder)) {
+            // Yields happen here automatically
+        }
+
+        // Get final JSON string
+        local json_string = json_builder_result(builder)
         debug_log("export_station_data: JSON built, size=" + json_string.len())
 
         write_station_file(json_string)

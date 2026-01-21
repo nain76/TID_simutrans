@@ -135,3 +135,118 @@ function format_timestamp() {
     local time = world.get_time()
     return format("simutrans-%04d-%02d", time.year, time.month + 1)
 }
+
+/**
+ * Create a JSON builder with state for chunked building
+ * @return Builder state table
+ */
+function create_json_builder() {
+    return {
+        parts = [],           // Accumulated JSON string parts
+        chunk_size = 20       // Items to process before yielding
+    }
+}
+
+/**
+ * Build JSON for array with yield points (generator)
+ * Processes array in chunks, yielding every chunk_size items
+ * @param builder Builder state table
+ * @param array_data Array to convert to JSON
+ */
+function json_build_array_chunked(builder, array_data) {
+    builder.parts.append("[")
+
+    local count = 0
+    local first = true
+
+    foreach (item in array_data) {
+        if (!first) {
+            builder.parts.append(",")
+        }
+        first = false
+
+        // Use existing to_json() for individual items (they're small)
+        builder.parts.append(to_json(item))
+        count++
+
+        // Yield every chunk_size items
+        if (count % builder.chunk_size == 0) {
+            yield null
+        }
+    }
+
+    builder.parts.append("]")
+}
+
+/**
+ * Get final JSON string from builder
+ * @param builder Builder state table
+ * @return Complete JSON string
+ */
+function json_builder_result(builder) {
+    return join_array(builder.parts, "")
+}
+
+/**
+ * Build train data JSON with yield points (generator)
+ * @param trains Array of train data tables
+ * @param game_time Current game time
+ * @param builder Builder state (will be populated with result)
+ */
+function build_train_json_chunked(trains, game_time, builder) {
+    // Build the root structure
+    builder.parts.append("{")
+
+    // Add timestamp
+    local timestamp = format_timestamp()
+    builder.parts.append("\"timestamp\":\"" + json_escape(timestamp) + "\",")
+
+    // Add game_time
+    builder.parts.append("\"game_time\":")
+    builder.parts.append(to_json({
+        year = game_time.year,
+        month = game_time.month,
+        ticks = game_time.ticks
+    }))
+    builder.parts.append(",")
+
+    // Add trains array (with chunking)
+    builder.parts.append("\"trains\":")
+    foreach (dummy in json_build_array_chunked(builder, trains)) {
+        yield null  // Propagate yields
+    }
+
+    builder.parts.append("}")
+}
+
+/**
+ * Build station data JSON with yield points (generator)
+ * @param lines_data Array of line data tables with stations
+ * @param builder Builder state (will be populated with result)
+ */
+function build_station_json_chunked(lines_data, builder) {
+    local timestamp = format_timestamp()
+    local game_time = world.get_time()
+
+    builder.parts.append("{")
+
+    // Add timestamp
+    builder.parts.append("\"timestamp\":\"" + json_escape(timestamp) + "\",")
+
+    // Add game_time
+    builder.parts.append("\"game_time\":")
+    builder.parts.append(to_json({
+        year = game_time.year,
+        month = game_time.month,
+        ticks = game_time.ticks
+    }))
+    builder.parts.append(",")
+
+    // Add lines array (with chunking)
+    builder.parts.append("\"lines\":")
+    foreach (dummy in json_build_array_chunked(builder, lines_data)) {
+        yield null  // Propagate yields
+    }
+
+    builder.parts.append("}")
+}
