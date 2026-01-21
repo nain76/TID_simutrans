@@ -705,7 +705,7 @@ function renderDiagram() {
 
                     // Create a normalized segment key (sort station names to avoid duplicates)
                     const segmentNames = [s1.name, s2.name].sort();
-                    const normalizedKey = `${group.name}:${segmentNames[0]}-${segmentNames[1]}`;
+                    const normalizedKey = `${group.name}:${segmentNames[0]}|${segmentNames[1]}`;
 
                     if (!groupSegments.has(normalizedKey)) {
                         groupSegments.set(normalizedKey, {
@@ -799,7 +799,7 @@ function renderDiagram() {
 
             // Use station names in segment key for consistency (sorted for normalization)
             const segmentNames = [s1.name, s2.name].sort();
-            const segmentKey = `${line.name}:${segmentNames[0]}-${segmentNames[1]}`;
+            const segmentKey = `${line.name}:${segmentNames[0]}|${segmentNames[1]}`;
             uniqueSegments.set(segmentKey, {
                 s1: s1,
                 s2: s2,
@@ -1748,12 +1748,12 @@ function getSegmentData(segmentKey, linesToRender, stationMidpoints, bounds) {
     const prefix = segmentKey.substring(0, colonIndex);
     const suffix = segmentKey.substring(colonIndex + 1);
 
-    // Parse station names from suffix (format: "stationA-stationB")
-    const dashIndex = suffix.indexOf('-');
-    if (dashIndex === -1) return null;
+    // Parse station names from suffix (format: "stationA|stationB")
+    const pipeIndex = suffix.indexOf('|');
+    if (pipeIndex === -1) return null;
 
-    const stationA = suffix.substring(0, dashIndex);
-    const stationB = suffix.substring(dashIndex + 1);
+    const stationA = suffix.substring(0, pipeIndex);
+    const stationB = suffix.substring(pipeIndex + 1);
 
     const s1Data = stationMidpoints.get(stationA);
     const s2Data = stationMidpoints.get(stationB);
@@ -1886,7 +1886,7 @@ function recalculateWaypoints() {
                     if (s1.name === s2.name) continue;
 
                     const segmentNames = [s1.name, s2.name].sort();
-                    const normalizedKey = `${group.name}:${segmentNames[0]}-${segmentNames[1]}`;
+                    const normalizedKey = `${group.name}:${segmentNames[0]}|${segmentNames[1]}`;
 
                     if (!currentSegments.has(normalizedKey)) {
                         currentSegments.set(normalizedKey, { s1: s1, s2: s2 });
@@ -1923,7 +1923,7 @@ function recalculateWaypoints() {
             if (s1.name === s2.name) continue;
 
             const segmentNames = [s1.name, s2.name].sort();
-            const segmentKey = `${line.name}:${segmentNames[0]}-${segmentNames[1]}`;
+            const segmentKey = `${line.name}:${segmentNames[0]}|${segmentNames[1]}`;
             currentSegments.set(segmentKey, { s1: s1, s2: s2 });
         }
     });
@@ -2072,7 +2072,7 @@ function handleRightClick(e) {
                     if (s1.name === s2.name) continue;
 
                     const segmentNames = [s1.name, s2.name].sort();
-                    const normalizedKey = `${group.name}:${segmentNames[0]}-${segmentNames[1]}`;
+                    const normalizedKey = `${group.name}:${segmentNames[0]}|${segmentNames[1]}`;
 
                     if (!groupSegments.has(normalizedKey)) {
                         groupSegments.set(normalizedKey, { s1: s1, s2: s2, color: color, group: group.name });
@@ -2126,7 +2126,7 @@ function handleRightClick(e) {
 
             // Use station names in segment key for consistency (sorted for normalization)
             const segmentNames = [s1.name, s2.name].sort();
-            const segmentKey = `${line.name}:${segmentNames[0]}-${segmentNames[1]}`;
+            const segmentKey = `${line.name}:${segmentNames[0]}|${segmentNames[1]}`;
             allSegments.set(segmentKey, { s1: s1, s2: s2, color: color, group: null });
         }
     });
