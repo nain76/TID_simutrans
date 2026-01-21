@@ -111,8 +111,10 @@
 
                 <div class="sidebar-section">
                     <h3>線路編集</h3>
-                    <button onclick="resetAllWaypoints()" class="btn-small" style="width: 100%; padding: 0.5rem; font-size: 0.85rem; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 0.5rem;">ドラッグポイントをリセット</button>
-                    <p style="font-size: 0.75rem; color: #9ca3af; margin: 0;">※リセットすると駅間に1個のドラッグポイントが配置されます</p>
+                    <button onclick="recalculateWaypoints()" class="btn-small" style="width: 100%; padding: 0.5rem; font-size: 0.85rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 0.5rem;">ドラッグポイントを再配置</button>
+                    <p style="font-size: 0.75rem; color: #9ca3af; margin: 0 0 0.5rem 0;">※路線変更時に位置を保持したまま再配置</p>
+                    <button onclick="resetAllWaypoints()" class="btn-small" style="width: 100%; padding: 0.5rem; font-size: 0.85rem; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 0.5rem;">ドラッグポイントをクリア</button>
+                    <p style="font-size: 0.75rem; color: #9ca3af; margin: 0;">※すべてのドラッグポイントを削除</p>
                 </div>
 
                 <div class="sidebar-section">

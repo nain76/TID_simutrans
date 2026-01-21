@@ -1794,7 +1794,7 @@ function removeWaypoint(segmentKey, waypointIndex) {
  * Reset all waypoints to initial state (clear all waypoints to show midpoint handles)
  */
 function resetAllWaypoints() {
-    if (!confirm('すべてのドラッグポイントをリセットしますか?')) {
+    if (!confirm('すべてのドラッグポイントをクリアしますか?')) {
         return;
     }
 
@@ -1803,7 +1803,180 @@ function resetAllWaypoints() {
 
     saveWaypoints();
     renderDiagram();
-    alert('ドラッグポイントをリセットしました');
+    alert('ドラッグポイントをクリアしました');
+}
+
+/**
+ * Recalculate waypoints for current segment positions
+ * This converts old absolute format to new relative format and removes orphaned waypoints
+ */
+function recalculateWaypoints() {
+    if (!stationData || selectedLines.size === 0) {
+        alert('路線を選択してください');
+        return;
+    }
+
+    const linesToRender = stationData.lines.filter(line => selectedLines.has(line.name));
+    if (linesToRender.length === 0) {
+        alert('路線を選択してください');
+        return;
+    }
+
+    const bounds = calculateBounds(linesToRender);
+
+    // Build station midpoints
+    const stationsByName = new Map();
+    linesToRender.forEach(line => {
+        line.stations.forEach(station => {
+            if (!stationsByName.has(station.name)) {
+                stationsByName.set(station.name, []);
+            }
+            stationsByName.get(station.name).push({
+                x: station.x,
+                y: station.y,
+                name: station.name
+            });
+        });
+    });
+
+    const stationMidpoints = new Map();
+    stationsByName.forEach((positions, stationName) => {
+        const avgX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
+        const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
+        const pos = gameToSVG(avgX, avgY, bounds);
+        stationMidpoints.set(stationName, {
+            name: stationName,
+            svgX: pos.x,
+            svgY: pos.y
+        });
+    });
+
+    // Build current segments
+    const currentSegments = new Map();
+
+    // Build line to group map
+    const lineToGroup = new Map();
+    lineGroups.forEach(group => {
+        group.lines.forEach(lineName => {
+            lineToGroup.set(lineName, group.name);
+        });
+    });
+
+    // Process groups
+    lineGroups.forEach((group) => {
+        linesToRender.forEach(line => {
+            if (group.lines.has(line.name)) {
+                const lineStations = [];
+                const seenNames = new Set();
+
+                line.stations.forEach(station => {
+                    if (seenNames.has(station.name)) return;
+                    seenNames.add(station.name);
+
+                    const midpoint = stationMidpoints.get(station.name);
+                    if (midpoint) {
+                        lineStations.push(midpoint);
+                    }
+                });
+
+                for (let i = 0; i < lineStations.length - 1; i++) {
+                    const s1 = lineStations[i];
+                    const s2 = lineStations[i + 1];
+
+                    if (s1.name === s2.name) continue;
+
+                    const segmentNames = [s1.name, s2.name].sort();
+                    const normalizedKey = `${group.name}:${segmentNames[0]}-${segmentNames[1]}`;
+
+                    if (!currentSegments.has(normalizedKey)) {
+                        currentSegments.set(normalizedKey, { s1: s1, s2: s2 });
+                    }
+                }
+            }
+        });
+    });
+
+    // Process ungrouped lines
+    linesToRender.forEach((line) => {
+        if (lineToGroup.has(line.name)) return;
+
+        const stations = line.stations;
+        if (!stations || stations.length === 0) return;
+
+        const processedStations = [];
+        const seenNames = new Set();
+
+        stations.forEach(station => {
+            if (seenNames.has(station.name)) return;
+            seenNames.add(station.name);
+
+            const midpoint = stationMidpoints.get(station.name);
+            if (midpoint) {
+                processedStations.push(midpoint);
+            }
+        });
+
+        for (let i = 0; i < processedStations.length - 1; i++) {
+            const s1 = processedStations[i];
+            const s2 = processedStations[i + 1];
+
+            if (s1.name === s2.name) continue;
+
+            const segmentNames = [s1.name, s2.name].sort();
+            const segmentKey = `${line.name}:${segmentNames[0]}-${segmentNames[1]}`;
+            currentSegments.set(segmentKey, { s1: s1, s2: s2 });
+        }
+    });
+
+    // Recalculate waypoints
+    const newWaypoints = new Map();
+    let convertedCount = 0;
+    let removedCount = 0;
+
+    segmentWaypoints.forEach((waypoints, segmentKey) => {
+        const segment = currentSegments.get(segmentKey);
+
+        if (!segment) {
+            // Segment doesn't exist in current selection - remove
+            removedCount += waypoints.length;
+            return;
+        }
+
+        const newWaypointList = [];
+        waypoints.forEach(wp => {
+            if (wp.t !== undefined && wp.offset !== undefined) {
+                // Already in relative format - keep as is
+                newWaypointList.push(wp);
+            } else if (wp.x !== undefined && wp.y !== undefined) {
+                // Old absolute format - convert to relative
+                const relativePos = absoluteToRelative(wp, segment.s1, segment.s2);
+                newWaypointList.push(relativePos);
+                convertedCount++;
+            }
+        });
+
+        if (newWaypointList.length > 0) {
+            newWaypoints.set(segmentKey, newWaypointList);
+        }
+    });
+
+    // Update waypoints
+    segmentWaypoints.clear();
+    newWaypoints.forEach((waypoints, key) => {
+        segmentWaypoints.set(key, waypoints);
+    });
+
+    saveWaypoints();
+    renderDiagram();
+
+    let message = 'ドラッグポイントを再配置しました';
+    if (convertedCount > 0) {
+        message += `\n${convertedCount}個の古い形式を変換しました`;
+    }
+    if (removedCount > 0) {
+        message += `\n${removedCount}個の不要なポイントを削除しました`;
+    }
+    alert(message);
 }
 
 /**
