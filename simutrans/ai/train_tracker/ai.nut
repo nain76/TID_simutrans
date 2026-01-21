@@ -310,6 +310,7 @@ function export_station_data() {
             if (!schedule) continue
 
             local stations = []
+            local station_keys = {}  // Track unique stations by coordinates
 
             // Extract stations from schedule entries with yield
             foreach (entry in _step_generator(schedule.entries)) {
@@ -317,13 +318,21 @@ function export_station_data() {
                 local halt = tile_x(entry.x, entry.y, entry.z).get_halt()
 
                 if (halt && halt.is_valid()) {
-                    local station_data = {
-                        name = halt.get_name(),
-                        x = entry.x,
-                        y = entry.y,
-                        z = entry.z
+                    // Create unique key for this station (x,y coordinates)
+                    // Note: We don't include z in the key to merge stations at different heights
+                    local station_key = entry.x + "," + entry.y
+
+                    // Only add if not already seen
+                    if (!(station_key in station_keys)) {
+                        local station_data = {
+                            name = halt.get_name(),
+                            x = entry.x,
+                            y = entry.y,
+                            z = entry.z
+                        }
+                        stations.append(station_data)
+                        station_keys[station_key] <- true
                     }
-                    stations.append(station_data)
                 }
             }
 

@@ -460,10 +460,22 @@ function renderDiagram() {
 
         if (!stations || stations.length === 0) return;
 
-        totalStations += stations.length;
+        // Deduplicate stations within this line first (handle circular routes)
+        const uniqueLineStations = new Map();
+        const deduplicatedStations = [];
+
+        stations.forEach(station => {
+            const key = `${Math.round(station.x)},${Math.round(station.y)}`;
+            if (!uniqueLineStations.has(key)) {
+                uniqueLineStations.set(key, station);
+                deduplicatedStations.push(station);
+            }
+        });
+
+        totalStations += deduplicatedStations.length;
 
         // Convert station coordinates
-        const svgStations = stations.map(station => {
+        const svgStations = deduplicatedStations.map(station => {
             const pos = gameToSVG(station.x, station.y, bounds);
             const svgStation = {
                 ...station,
@@ -471,8 +483,7 @@ function renderDiagram() {
                 svgY: pos.y
             };
 
-            // Track unique stations by game coordinate key (rounded to avoid floating point issues)
-            // Use game coordinates to ensure the same physical station is only rendered once
+            // Track unique stations globally (across all lines)
             const key = `${Math.round(station.x)},${Math.round(station.y)}`;
             if (!uniqueStations.has(key)) {
                 uniqueStations.set(key, svgStation);
@@ -485,6 +496,11 @@ function renderDiagram() {
         for (let i = 0; i < svgStations.length - 1; i++) {
             const s1 = svgStations[i];
             const s2 = svgStations[i + 1];
+
+            // Skip if same station (shouldn't happen after dedup, but be safe)
+            if (Math.round(s1.x) === Math.round(s2.x) && Math.round(s1.y) === Math.round(s2.y)) {
+                continue;
+            }
 
             // Create a unique key for this segment (order-independent, using game coordinates)
             const key1 = `${Math.round(s1.x)},${Math.round(s1.y)}`;
