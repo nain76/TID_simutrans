@@ -53,9 +53,8 @@ let snapDistance = 20; // Distance in pixels to snap to a station
 async function init() {
     console.log('Initializing diagram viewer...');
 
-    // Clear line groups (reset to default state)
-    lineGroups = [];
-    updateGroupsList();
+    // Load line groups from localStorage
+    loadLineGroups();
 
     // Setup event listeners
     setupEventListeners();
@@ -220,6 +219,12 @@ function setupEventListeners() {
         }
         isPanning = false;
         svgElement.style.cursor = 'grab';
+    });
+
+    // Right-click to add waypoint on any line
+    svgElement.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        handleRightClick(e);
     });
 
     // Set initial cursor
@@ -651,42 +656,56 @@ function renderDiagram() {
             }
         });
 
-        // Use the base line's segments for the group track
-        if (baseLine && baseLine.stations && baseLine.stations.length > 0) {
-            const lineStations = [];
-            const seenNames = new Set();
+        // Collect all unique segments from all lines in the group
+        const groupSegments = new Map(); // Map of segment key to segment data
 
-            baseLine.stations.forEach(station => {
-                if (seenNames.has(station.name)) return;
-                seenNames.add(station.name);
+        linesToRender.forEach(line => {
+            if (group.lines.has(line.name)) {
+                const lineStations = [];
+                const seenNames = new Set();
 
-                const midpoint = stationMidpoints.get(station.name);
-                if (midpoint) {
-                    const pos = gameToSVG(midpoint.x, midpoint.y, bounds);
-                    lineStations.push({
-                        ...midpoint,
-                        svgX: pos.x,
-                        svgY: pos.y
-                    });
-                }
-            });
+                line.stations.forEach(station => {
+                    if (seenNames.has(station.name)) return;
+                    seenNames.add(station.name);
 
-            // Create segments from the base line
-            for (let i = 0; i < lineStations.length - 1; i++) {
-                const s1 = lineStations[i];
-                const s2 = lineStations[i + 1];
-
-                if (s1.name === s2.name) continue;
-
-                const segmentKey = `${group.name}:${i}`;
-                uniqueSegments.set(segmentKey, {
-                    s1: s1,
-                    s2: s2,
-                    color: color,
-                    group: group.name
+                    const midpoint = stationMidpoints.get(station.name);
+                    if (midpoint) {
+                        const pos = gameToSVG(midpoint.x, midpoint.y, bounds);
+                        lineStations.push({
+                            ...midpoint,
+                            svgX: pos.x,
+                            svgY: pos.y
+                        });
+                    }
                 });
+
+                // Create segments from this line
+                for (let i = 0; i < lineStations.length - 1; i++) {
+                    const s1 = lineStations[i];
+                    const s2 = lineStations[i + 1];
+
+                    if (s1.name === s2.name) continue;
+
+                    // Create a normalized segment key (sort station names to avoid duplicates)
+                    const segmentNames = [s1.name, s2.name].sort();
+                    const normalizedKey = `${group.name}:${segmentNames[0]}-${segmentNames[1]}`;
+
+                    if (!groupSegments.has(normalizedKey)) {
+                        groupSegments.set(normalizedKey, {
+                            s1: s1,
+                            s2: s2,
+                            color: color,
+                            group: group.name
+                        });
+                    }
+                }
             }
-        }
+        });
+
+        // Add all group segments to uniqueSegments
+        groupSegments.forEach((segment, key) => {
+            uniqueSegments.set(key, segment);
+        });
 
         // Add group lines data to main linesData
         linesData.push(...groupLinesData);
@@ -792,14 +811,20 @@ function renderDiagram() {
 
             // Draw waypoint handles (if any)
             waypoints.forEach((wp, wpIndex) => {
-                svgContent += `<circle cx="${wp.x}" cy="${wp.y}" r="6" class="waypoint-handle" fill="#ff6600" stroke="#fff" stroke-width="2" style="cursor: move;" data-segment-key="${segmentKey}" data-waypoint-index="${wpIndex}" />`;
+                // Draw a larger invisible circle for better hit detection
+                svgContent += `<circle cx="${wp.x}" cy="${wp.y}" r="15" class="waypoint-handle" fill="transparent" stroke="none" style="cursor: move;" data-segment-key="${segmentKey}" data-waypoint-index="${wpIndex}" />`;
+                // Draw the visible handle
+                svgContent += `<circle cx="${wp.x}" cy="${wp.y}" r="6" fill="#ff6600" stroke="#fff" stroke-width="2" style="pointer-events: none;" />`;
             });
 
             // Draw midpoint handle for adding new waypoints
             if (waypoints.length === 0) {
                 const midX = (segment.s1.svgX + segment.s2.svgX) / 2;
                 const midY = (segment.s1.svgY + segment.s2.svgY) / 2;
-                svgContent += `<circle cx="${midX}" cy="${midY}" r="5" class="midpoint-handle" fill="#3b82f6" fill-opacity="0.5" stroke="#fff" stroke-width="2" style="cursor: move;" data-segment-key="${segmentKey}" />`;
+                // Draw a larger invisible circle for better hit detection
+                svgContent += `<circle cx="${midX}" cy="${midY}" r="15" class="midpoint-handle" fill="transparent" stroke="none" style="cursor: move;" data-segment-key="${segmentKey}" />`;
+                // Draw the visible handle
+                svgContent += `<circle cx="${midX}" cy="${midY}" r="5" fill="#3b82f6" fill-opacity="0.5" stroke="#fff" stroke-width="2" style="pointer-events: none;" />`;
             }
         });
     }
@@ -1022,6 +1047,46 @@ function updateStats(lines, trains, stations) {
 }
 
 /**
+ * Save line groups to localStorage
+ */
+function saveLineGroups() {
+    try {
+        const serialized = lineGroups.map(group => ({
+            name: group.name,
+            lines: Array.from(group.lines)
+        }));
+        localStorage.setItem('lineGroups', JSON.stringify(serialized));
+        console.log('[Diagram] Line groups saved to localStorage');
+    } catch (e) {
+        console.warn('[Diagram] Failed to save line groups:', e);
+    }
+}
+
+/**
+ * Load line groups from localStorage
+ */
+function loadLineGroups() {
+    try {
+        const saved = localStorage.getItem('lineGroups');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            lineGroups = parsed.map(group => ({
+                name: group.name,
+                lines: new Set(group.lines)
+            }));
+            console.log('[Diagram] Line groups loaded from localStorage:', lineGroups.length);
+        } else {
+            lineGroups = [];
+        }
+        updateGroupsList();
+    } catch (e) {
+        console.warn('[Diagram] Failed to load line groups:', e);
+        lineGroups = [];
+        updateGroupsList();
+    }
+}
+
+/**
  * Create a new line group
  */
 function createGroup() {
@@ -1045,6 +1110,7 @@ function createGroup() {
     });
 
     input.value = '';
+    saveLineGroups();
     updateGroupsList();
     renderDiagram();
 }
@@ -1054,6 +1120,7 @@ function createGroup() {
  */
 function deleteGroup(groupName) {
     lineGroups = lineGroups.filter(g => g.name !== groupName);
+    saveLineGroups();
     updateGroupsList();
     renderDiagram();
 }
@@ -1065,6 +1132,7 @@ function addLineToGroup(groupName, lineName) {
     const group = lineGroups.find(g => g.name === groupName);
     if (group) {
         group.lines.add(lineName);
+        saveLineGroups();
         updateGroupsList();
         renderDiagram();
     }
@@ -1077,9 +1145,32 @@ function removeLineFromGroup(groupName, lineName) {
     const group = lineGroups.find(g => g.name === groupName);
     if (group) {
         group.lines.delete(lineName);
+        saveLineGroups();
         updateGroupsList();
         renderDiagram();
     }
+}
+
+/**
+ * Toggle visibility of all lines in a group
+ */
+function toggleGroupVisibility(groupName) {
+    const group = lineGroups.find(g => g.name === groupName);
+    if (!group || group.lines.size === 0) return;
+
+    // Check if all lines in the group are currently visible
+    const allVisible = Array.from(group.lines).every(line => selectedLines.has(line));
+
+    if (allVisible) {
+        // Hide all lines in the group
+        group.lines.forEach(line => selectedLines.delete(line));
+    } else {
+        // Show all lines in the group
+        group.lines.forEach(line => selectedLines.add(line));
+    }
+
+    updateLineSelector();
+    renderDiagram();
 }
 
 /**
@@ -1098,6 +1189,11 @@ function updateGroupsList() {
     lineGroups.forEach((group, index) => {
         const color = LINE_COLORS[index % LINE_COLORS.length];
 
+        // Check if all lines in the group are visible
+        const allVisible = Array.from(group.lines).every(line => selectedLines.has(line));
+        const visibilityButtonText = allVisible ? '非表示' : '表示';
+        const visibilityButtonColor = allVisible ? '#ef4444' : '#10b981';
+
         html += `
             <div style="border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; background: #f9fafb;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
@@ -1105,7 +1201,10 @@ function updateGroupsList() {
                         <div class="line-color" style="background-color: ${color}; width: 12px; height: 12px; border-radius: 2px;"></div>
                         <strong style="font-size: 0.9rem;">${group.name}</strong>
                     </div>
-                    <button onclick="deleteGroup('${group.name.replace(/'/g, "\\'")}')" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; background: #ef4444; color: white; border: none; border-radius: 3px; cursor: pointer;">削除</button>
+                    <div style="display: flex; gap: 0.3rem;">
+                        <button onclick="toggleGroupVisibility('${group.name.replace(/'/g, "\\'")}')" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; background: ${visibilityButtonColor}; color: white; border: none; border-radius: 3px; cursor: pointer;">${visibilityButtonText}</button>
+                        <button onclick="deleteGroup('${group.name.replace(/'/g, "\\'")}')" style="padding: 0.2rem 0.4rem; font-size: 0.75rem; background: #ef4444; color: white; border: none; border-radius: 3px; cursor: pointer;">削除</button>
+                    </div>
                 </div>
                 <div style="margin-top: 0.3rem;">
                     <select onchange="handleAddLineToGroup(this, '${group.name.replace(/'/g, "\\'")}')" style="width: 100%; padding: 0.3rem; font-size: 0.8rem; border: 1px solid #d1d5db; border-radius: 3px;">
@@ -1273,6 +1372,199 @@ function startMidpointDrag(segmentKey, midX, midY) {
     // Start dragging the new waypoint
     isDraggingWaypoint = true;
     draggedWaypoint = { segmentKey, waypointIndex: waypoints.length - 1 };
+}
+
+/**
+ * Handle right-click to add waypoint on track
+ */
+function handleRightClick(e) {
+    const svgPos = clientToSVG(e.clientX, e.clientY);
+
+    // Build current segments map
+    if (!stationData || selectedLines.size === 0) return;
+
+    const linesToRender = stationData.lines.filter(line => selectedLines.has(line.name));
+    if (linesToRender.length === 0) return;
+
+    const bounds = calculateBounds(linesToRender);
+
+    // Rebuild segment data (same logic as renderDiagram)
+    const stationsByName = new Map();
+    linesToRender.forEach(line => {
+        line.stations.forEach(station => {
+            if (!stationsByName.has(station.name)) {
+                stationsByName.set(station.name, []);
+            }
+            stationsByName.get(station.name).push({
+                x: station.x,
+                y: station.y,
+                name: station.name
+            });
+        });
+    });
+
+    const stationMidpoints = new Map();
+    stationsByName.forEach((positions, stationName) => {
+        const avgX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
+        const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
+        stationMidpoints.set(stationName, { name: stationName, x: avgX, y: avgY });
+    });
+
+    const allSegments = new Map();
+
+    // Build line to group map
+    const lineToGroup = new Map();
+    lineGroups.forEach(group => {
+        group.lines.forEach(lineName => {
+            lineToGroup.set(lineName, group.name);
+        });
+    });
+
+    // Process groups
+    lineGroups.forEach((group, groupIndex) => {
+        const color = LINE_COLORS[groupIndex % LINE_COLORS.length];
+        const groupSegments = new Map();
+
+        linesToRender.forEach(line => {
+            if (group.lines.has(line.name)) {
+                const lineStations = [];
+                const seenNames = new Set();
+
+                line.stations.forEach(station => {
+                    if (seenNames.has(station.name)) return;
+                    seenNames.add(station.name);
+
+                    const midpoint = stationMidpoints.get(station.name);
+                    if (midpoint) {
+                        const pos = gameToSVG(midpoint.x, midpoint.y, bounds);
+                        lineStations.push({
+                            ...midpoint,
+                            svgX: pos.x,
+                            svgY: pos.y
+                        });
+                    }
+                });
+
+                for (let i = 0; i < lineStations.length - 1; i++) {
+                    const s1 = lineStations[i];
+                    const s2 = lineStations[i + 1];
+
+                    if (s1.name === s2.name) continue;
+
+                    const segmentNames = [s1.name, s2.name].sort();
+                    const normalizedKey = `${group.name}:${segmentNames[0]}-${segmentNames[1]}`;
+
+                    if (!groupSegments.has(normalizedKey)) {
+                        groupSegments.set(normalizedKey, { s1: s1, s2: s2, color: color, group: group.name });
+                    }
+                }
+            }
+        });
+
+        groupSegments.forEach((segment, key) => {
+            allSegments.set(key, segment);
+        });
+    });
+
+    // Process ungrouped lines
+    linesToRender.forEach((line, lineIndex) => {
+        if (lineToGroup.has(line.name)) return;
+
+        const colorIndex = lineGroups.length + lineIndex;
+        const color = LINE_COLORS[colorIndex % LINE_COLORS.length];
+        const stations = line.stations;
+
+        if (!stations || stations.length === 0) return;
+
+        const processedStations = [];
+        const seenNames = new Set();
+
+        stations.forEach(station => {
+            if (seenNames.has(station.name)) return;
+            seenNames.add(station.name);
+
+            const midpoint = stationMidpoints.get(station.name);
+            if (midpoint) {
+                processedStations.push(midpoint);
+            }
+        });
+
+        const svgStations = processedStations.map(station => {
+            const pos = gameToSVG(station.x, station.y, bounds);
+            return {
+                ...station,
+                svgX: pos.x,
+                svgY: pos.y
+            };
+        });
+
+        for (let i = 0; i < svgStations.length - 1; i++) {
+            const s1 = svgStations[i];
+            const s2 = svgStations[i + 1];
+
+            if (s1.name === s2.name) continue;
+
+            const segmentKey = `${line.name}:${i}`;
+            allSegments.set(segmentKey, { s1: s1, s2: s2, color: color, group: null });
+        }
+    });
+
+    // Find nearest segment
+    const result = findNearestSegment(svgPos.x, svgPos.y, allSegments);
+
+    if (result && result.distance < 30) { // Within 30 pixels
+        const { segmentKey, nearestPoint } = result;
+
+        // Add waypoint at the nearest point
+        const waypoints = segmentWaypoints.get(segmentKey) || [];
+        waypoints.push(nearestPoint);
+        segmentWaypoints.set(segmentKey, waypoints);
+
+        // Start dragging the new waypoint
+        isDraggingWaypoint = true;
+        draggedWaypoint = { segmentKey, waypointIndex: waypoints.length - 1 };
+
+        renderDiagram();
+    }
+}
+
+/**
+ * Find nearest segment to a given point
+ */
+function findNearestSegment(x, y, segments) {
+    let minDist = Infinity;
+    let result = null;
+
+    segments.forEach((segment, segmentKey) => {
+        const waypoints = segmentWaypoints.get(segmentKey) || [];
+
+        // Build the path through all waypoints
+        const points = [
+            { x: segment.s1.svgX, y: segment.s1.svgY },
+            ...waypoints,
+            { x: segment.s2.svgX, y: segment.s2.svgY }
+        ];
+
+        // Check distance to each segment of the path
+        for (let i = 0; i < points.length - 1; i++) {
+            const p1 = points[i];
+            const p2 = points[i + 1];
+
+            const nearest = nearestPointOnSegment(x, y, p1.x, p1.y, p2.x, p2.y);
+            const dist = Math.sqrt(Math.pow(nearest.x - x, 2) + Math.pow(nearest.y - y, 2));
+
+            if (dist < minDist) {
+                minDist = dist;
+                result = {
+                    segmentKey: segmentKey,
+                    nearestPoint: nearest,
+                    distance: dist
+                };
+            }
+        }
+    });
+
+    return result;
 }
 
 // Initialize on page load
