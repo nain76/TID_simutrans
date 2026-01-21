@@ -41,11 +41,21 @@ let panOffset = { x: 0, y: 0 };
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
 
+// Line editing state
+let segmentWaypoints = new Map(); // Map<segmentKey, [{x, y}]> - waypoints for each segment
+let isDraggingWaypoint = false;
+let draggedWaypoint = null; // {segmentKey, waypointIndex}
+let snapDistance = 20; // Distance in pixels to snap to a station
+
 /**
  * Initialize the diagram viewer
  */
 async function init() {
     console.log('Initializing diagram viewer...');
+
+    // Clear line groups (reset to default state)
+    lineGroups = [];
+    updateGroupsList();
 
     // Setup event listeners
     setupEventListeners();
@@ -149,8 +159,27 @@ function setupEventListeners() {
 
     // Mouse pan (drag)
     svgElement.addEventListener('mousedown', (e) => {
-        // Only pan with left mouse button
-        if (e.button === 0) {
+        // Check if clicking on a waypoint handle
+        if (e.target.classList.contains('waypoint-handle')) {
+            e.preventDefault();
+            const segmentKey = e.target.getAttribute('data-segment-key');
+            const waypointIndex = parseInt(e.target.getAttribute('data-waypoint-index'));
+            startWaypointDrag(segmentKey, waypointIndex);
+            return;
+        }
+
+        // Check if clicking on a midpoint handle
+        if (e.target.classList.contains('midpoint-handle')) {
+            e.preventDefault();
+            const segmentKey = e.target.getAttribute('data-segment-key');
+            const midX = parseFloat(e.target.getAttribute('cx'));
+            const midY = parseFloat(e.target.getAttribute('cy'));
+            startMidpointDrag(segmentKey, midX, midY);
+            return;
+        }
+
+        // Only pan with left mouse button and only if not dragging a waypoint
+        if (e.button === 0 && !isDraggingWaypoint) {
             e.preventDefault(); // Prevent text selection during drag
             isPanning = true;
             panStart = { x: e.clientX, y: e.clientY };
@@ -159,7 +188,9 @@ function setupEventListeners() {
     });
 
     svgElement.addEventListener('mousemove', (e) => {
-        if (isPanning) {
+        if (isDraggingWaypoint) {
+            handleWaypointDrag(e);
+        } else if (isPanning) {
             const dx = (e.clientX - panStart.x) / zoomLevel;
             const dy = (e.clientY - panStart.y) / zoomLevel;
             panOffset.x += dx;
@@ -171,12 +202,22 @@ function setupEventListeners() {
 
     svgElement.addEventListener('mouseup', (e) => {
         if (e.button === 0) {
+            if (isDraggingWaypoint) {
+                isDraggingWaypoint = false;
+                draggedWaypoint = null;
+                renderDiagram();
+            }
             isPanning = false;
             svgElement.style.cursor = 'grab';
         }
     });
 
     svgElement.addEventListener('mouseleave', () => {
+        if (isDraggingWaypoint) {
+            isDraggingWaypoint = false;
+            draggedWaypoint = null;
+            renderDiagram();
+        }
         isPanning = false;
         svgElement.style.cursor = 'grab';
     });
@@ -728,9 +769,38 @@ function renderDiagram() {
 
     // Draw all unique track segments once (if enabled)
     if (displaySettings.showTracks) {
-        uniqueSegments.forEach(segment => {
+        uniqueSegments.forEach((segment, segmentKey) => {
             const trackColor = displaySettings.useLineColorsForTracks ? segment.color : displaySettings.trackColor;
-            svgContent += `<line x1="${segment.s1.svgX}" y1="${segment.s1.svgY}" x2="${segment.s2.svgX}" y2="${segment.s2.svgY}" class="rail-line" stroke="${trackColor}" stroke-width="2" stroke-opacity="${displaySettings.trackOpacity}" />`;
+
+            // Get waypoints for this segment (if any)
+            const waypoints = segmentWaypoints.get(segmentKey) || [];
+
+            // Build the path through all waypoints
+            const points = [
+                { x: segment.s1.svgX, y: segment.s1.svgY },
+                ...waypoints,
+                { x: segment.s2.svgX, y: segment.s2.svgY }
+            ];
+
+            // Draw polyline through all points
+            if (waypoints.length > 0) {
+                const pointsStr = points.map(p => `${p.x},${p.y}`).join(' ');
+                svgContent += `<polyline points="${pointsStr}" class="rail-line" stroke="${trackColor}" stroke-width="2" stroke-opacity="${displaySettings.trackOpacity}" fill="none" />`;
+            } else {
+                svgContent += `<line x1="${segment.s1.svgX}" y1="${segment.s1.svgY}" x2="${segment.s2.svgX}" y2="${segment.s2.svgY}" class="rail-line" stroke="${trackColor}" stroke-width="2" stroke-opacity="${displaySettings.trackOpacity}" />`;
+            }
+
+            // Draw waypoint handles (if any)
+            waypoints.forEach((wp, wpIndex) => {
+                svgContent += `<circle cx="${wp.x}" cy="${wp.y}" r="6" class="waypoint-handle" fill="#ff6600" stroke="#fff" stroke-width="2" style="cursor: move;" data-segment-key="${segmentKey}" data-waypoint-index="${wpIndex}" />`;
+            });
+
+            // Draw midpoint handle for adding new waypoints
+            if (waypoints.length === 0) {
+                const midX = (segment.s1.svgX + segment.s2.svgX) / 2;
+                const midY = (segment.s1.svgY + segment.s2.svgY) / 2;
+                svgContent += `<circle cx="${midX}" cy="${midY}" r="5" class="midpoint-handle" fill="#3b82f6" fill-opacity="0.5" stroke="#fff" stroke-width="2" style="cursor: move;" data-segment-key="${segmentKey}" />`;
+            }
         });
     }
 
@@ -1081,6 +1151,128 @@ function handleAddLineToGroup(select, groupName) {
         addLineToGroup(groupName, lineName);
         select.value = '';
     }
+}
+
+/**
+ * Convert client coordinates to SVG coordinates
+ */
+function clientToSVG(clientX, clientY) {
+    const svgElement = document.getElementById('railroad-diagram');
+    const pt = svgElement.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const svgPt = pt.matrixTransform(svgElement.getScreenCTM().inverse());
+
+    // Account for zoom and pan transform on diagram-content
+    const x = (svgPt.x - panOffset.x) / zoomLevel;
+    const y = (svgPt.y - panOffset.y) / zoomLevel;
+
+    return { x, y };
+}
+
+/**
+ * Find nearest station to a given point
+ */
+function findNearestStation(x, y, stations) {
+    let nearest = null;
+    let minDist = snapDistance;
+
+    stations.forEach(station => {
+        const dist = Math.sqrt(Math.pow(station.svgX - x, 2) + Math.pow(station.svgY - y, 2));
+        if (dist < minDist) {
+            minDist = dist;
+            nearest = station;
+        }
+    });
+
+    return nearest;
+}
+
+/**
+ * Handle waypoint drag
+ */
+function handleWaypointDrag(e) {
+    if (!draggedWaypoint) return;
+
+    const svgPos = clientToSVG(e.clientX, e.clientY);
+
+    // Get current segment
+    const linesToRender = stationData.lines.filter(line => selectedLines.has(line.name));
+    const bounds = calculateBounds(linesToRender);
+
+    // Collect all stations for snapping
+    const stationMidpoints = new Map();
+    const stationsByName = new Map();
+
+    linesToRender.forEach(line => {
+        line.stations.forEach(station => {
+            if (!stationsByName.has(station.name)) {
+                stationsByName.set(station.name, []);
+            }
+            stationsByName.get(station.name).push({
+                x: station.x,
+                y: station.y,
+                name: station.name
+            });
+        });
+    });
+
+    stationsByName.forEach((positions, stationName) => {
+        const avgX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
+        const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
+        const pos = gameToSVG(avgX, avgY, bounds);
+        stationMidpoints.set(stationName, {
+            name: stationName,
+            svgX: pos.x,
+            svgY: pos.y
+        });
+    });
+
+    const allStations = Array.from(stationMidpoints.values());
+
+    // Check if near a station
+    const nearestStation = findNearestStation(svgPos.x, svgPos.y, allStations);
+
+    let finalPos;
+    if (nearestStation) {
+        // Snap to station
+        finalPos = { x: nearestStation.svgX, y: nearestStation.svgY };
+    } else {
+        // Use mouse position
+        finalPos = svgPos;
+    }
+
+    // Update waypoint position
+    const waypoints = segmentWaypoints.get(draggedWaypoint.segmentKey) || [];
+    if (draggedWaypoint.waypointIndex < waypoints.length) {
+        waypoints[draggedWaypoint.waypointIndex] = finalPos;
+        segmentWaypoints.set(draggedWaypoint.segmentKey, waypoints);
+    }
+
+    // Re-render to show updated position
+    renderDiagram();
+}
+
+/**
+ * Start dragging a waypoint
+ */
+function startWaypointDrag(segmentKey, waypointIndex) {
+    isDraggingWaypoint = true;
+    draggedWaypoint = { segmentKey, waypointIndex };
+}
+
+/**
+ * Start dragging a new waypoint from midpoint
+ */
+function startMidpointDrag(segmentKey, midX, midY) {
+    // Create a new waypoint at the midpoint
+    const waypoints = segmentWaypoints.get(segmentKey) || [];
+    waypoints.push({ x: midX, y: midY });
+    segmentWaypoints.set(segmentKey, waypoints);
+
+    // Start dragging the new waypoint
+    isDraggingWaypoint = true;
+    draggedWaypoint = { segmentKey, waypointIndex: waypoints.length - 1 };
 }
 
 // Initialize on page load
