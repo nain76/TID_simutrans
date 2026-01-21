@@ -114,6 +114,7 @@ function setupEventListeners() {
     svgElement.addEventListener('mousedown', (e) => {
         // Only pan with left mouse button
         if (e.button === 0) {
+            e.preventDefault(); // Prevent text selection during drag
             isPanning = true;
             panStart = { x: e.clientX, y: e.clientY };
             svgElement.style.cursor = 'grabbing';
@@ -470,8 +471,9 @@ function renderDiagram() {
                 svgY: pos.y
             };
 
-            // Track unique stations by coordinate key (rounded to avoid floating point issues)
-            const key = `${Math.round(station.x)},${Math.round(station.y)},${Math.round(station.z)}`;
+            // Track unique stations by SVG coordinate key (rounded to avoid floating point issues)
+            // Use SVG coordinates instead of game coordinates to avoid visual duplicates
+            const key = `${Math.round(pos.x)},${Math.round(pos.y)}`;
             if (!uniqueStations.has(key)) {
                 uniqueStations.set(key, svgStation);
             }
@@ -484,9 +486,9 @@ function renderDiagram() {
             const s1 = svgStations[i];
             const s2 = svgStations[i + 1];
 
-            // Create a unique key for this segment (order-independent, rounded to avoid floating point issues)
-            const key1 = `${Math.round(s1.x)},${Math.round(s1.y)},${Math.round(s1.z)}`;
-            const key2 = `${Math.round(s2.x)},${Math.round(s2.y)},${Math.round(s2.z)}`;
+            // Create a unique key for this segment (order-independent, using SVG coordinates)
+            const key1 = `${Math.round(s1.svgX)},${Math.round(s1.svgY)}`;
+            const key2 = `${Math.round(s2.svgX)},${Math.round(s2.svgY)}`;
             const segmentKey = key1 < key2 ? `${key1}-${key2}` : `${key2}-${key1}`;
 
             // Store segment if not already stored
