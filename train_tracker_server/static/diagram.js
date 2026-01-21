@@ -15,6 +15,7 @@ let selectedLines = new Set();
 let companyFilter = '';
 let lineSearchFilter = '';
 let displaySettings = {
+    showTracks: true,
     showStationNames: true,
     showTrainNames: true,
     showSpeeds: true
@@ -74,6 +75,11 @@ function setupEventListeners() {
     });
 
     // Display settings checkboxes
+    document.getElementById('show-tracks').addEventListener('change', (e) => {
+        displaySettings.showTracks = e.target.checked;
+        renderDiagram();
+    });
+
     document.getElementById('show-station-names').addEventListener('change', (e) => {
         displaySettings.showStationNames = e.target.checked;
         renderDiagram();
@@ -560,10 +566,12 @@ function renderDiagram() {
 
     const totalStations = uniqueStations.size;
 
-    // Draw all unique track segments once
-    uniqueSegments.forEach(segment => {
-        svgContent += `<line x1="${segment.s1.svgX}" y1="${segment.s1.svgY}" x2="${segment.s2.svgX}" y2="${segment.s2.svgY}" class="rail-line" stroke="${segment.color}" stroke-width="2" />`;
-    });
+    // Draw all unique track segments once (if enabled)
+    if (displaySettings.showTracks) {
+        uniqueSegments.forEach(segment => {
+            svgContent += `<line x1="${segment.s1.svgX}" y1="${segment.s1.svgY}" x2="${segment.s2.svgX}" y2="${segment.s2.svgY}" class="rail-line" stroke="${segment.color}" stroke-width="2" stroke-opacity="0.3" />`;
+        });
+    }
 
     // Draw all unique stations once (after all tracks, before trains)
     uniqueStations.forEach(station => {
