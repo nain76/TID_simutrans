@@ -56,15 +56,16 @@ config <- {
     // Days per month (Simutrans default)
     days_per_month = 30,
     // Export interval in days
-    export_interval_days = 2
+    train_export_interval_days = 2,  // Train data every 2 days
+    station_export_interval_days = 4  // Station data every 4 days
 }
 
 // Persistent data (survives save/load)
 persistent <- {
-    last_export_day = -1,  // Track last export day (-1 means never exported)
+    last_train_export_day = -1,  // Track last train export day (-1 means never exported)
+    last_station_export_day = -1,  // Track last station export day (-1 means never exported)
     export_count = 0,
-    ai_player = null,  // Store AI player reference
-    export_type = "train"  // Alternate between "train" and "station" to avoid timeout
+    ai_player = null  // Store AI player reference
 }
 
 /**
@@ -117,26 +118,29 @@ function step() {
 
 /**
  * Main work function - called periodically by step()
- * Exports data every 2 in-game days
- * Alternates between train and station data to avoid timeout
+ * Exports train data every 2 in-game days, station data every 4 days
+ * Only one export per step to avoid timeout
  * Generator function to handle yields properly
  */
 function work() {
     local current_day = get_total_days()
 
-    // Check if 2 days have passed since last export (or never exported)
-    if (persistent.last_export_day == -1 || current_day - persistent.last_export_day >= config.export_interval_days) {
-        // Update last_export_day BEFORE executing to prevent duplicate execution
-        persistent.last_export_day = current_day
+    // Check if train data should be exported (every 2 days)
+    local should_export_train = (persistent.last_train_export_day == -1 ||
+                                 current_day - persistent.last_train_export_day >= config.train_export_interval_days)
 
-        // Alternate between train and station data export to avoid timeout
-        if (persistent.export_type == "train") {
-            export_train_data()
-            persistent.export_type = "station"
-        } else {
-            export_station_data()
-            persistent.export_type = "train"
-        }
+    // Check if station data should be exported (every 4 days)
+    local should_export_station = (persistent.last_station_export_day == -1 ||
+                                   current_day - persistent.last_station_export_day >= config.station_export_interval_days)
+
+    // Export only one type per step to avoid timeout
+    // Train data has priority
+    if (should_export_train) {
+        export_train_data()
+        persistent.last_train_export_day = current_day
+    } else if (should_export_station) {
+        export_station_data()
+        persistent.last_station_export_day = current_day
     }
 
     yield null  // Always yield to prevent blocking
@@ -373,8 +377,8 @@ function write_station_file(json_string) {
  */
 function save() {
     return "persistent <- { " +
-           "last_export_day = " + persistent.last_export_day + ", " +
+           "last_train_export_day = " + persistent.last_train_export_day + ", " +
+           "last_station_export_day = " + persistent.last_station_export_day + ", " +
            "export_count = " + persistent.export_count + ", " +
-           "ai_player = null, " +
-           "export_type = \"" + persistent.export_type + "\" }"
+           "ai_player = null }"
 }
