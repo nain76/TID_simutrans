@@ -729,8 +729,12 @@ function renderDiagram() {
         const groupSegmentsArray = Array.from(groupSegments.entries()).map(([key, seg]) => {
             const relativeWaypoints = segmentWaypoints.get(key) || [];
             const waypoints = relativeWaypoints
-                .filter(rel => rel.t !== undefined && rel.offset !== undefined)
-                .map(rel => relativeToAbsolute(rel, seg.s1, seg.s2));
+                .filter(rel => rel.t !== undefined && rel.offset !== undefined &&
+                               typeof rel.t === 'number' && typeof rel.offset === 'number' &&
+                               !isNaN(rel.t) && !isNaN(rel.offset))
+                .map(rel => relativeToAbsolute(rel, seg.s1, seg.s2))
+                .filter(wp => wp && typeof wp.x === 'number' && typeof wp.y === 'number' &&
+                              !isNaN(wp.x) && !isNaN(wp.y) && isFinite(wp.x) && isFinite(wp.y));
             return {
                 segmentKey: key,
                 s1: seg.s1,
@@ -819,8 +823,12 @@ function renderDiagram() {
             // Get waypoints for this segment and convert to absolute coordinates
             const relativeWaypoints = segmentWaypoints.get(segmentKey) || [];
             const waypoints = relativeWaypoints
-                .filter(rel => rel.t !== undefined && rel.offset !== undefined)
-                .map(rel => relativeToAbsolute(rel, s1, s2));
+                .filter(rel => rel.t !== undefined && rel.offset !== undefined &&
+                               typeof rel.t === 'number' && typeof rel.offset === 'number' &&
+                               !isNaN(rel.t) && !isNaN(rel.offset))
+                .map(rel => relativeToAbsolute(rel, s1, s2))
+                .filter(wp => wp && typeof wp.x === 'number' && typeof wp.y === 'number' &&
+                              !isNaN(wp.x) && !isNaN(wp.y) && isFinite(wp.x) && isFinite(wp.y));
 
             lineSegmentsArray.push({
                 segmentKey: segmentKey,
@@ -849,8 +857,12 @@ function renderDiagram() {
             // Get waypoints for this segment (if any) and convert from relative to absolute coordinates
             const relativeWaypoints = segmentWaypoints.get(segmentKey) || [];
             const waypoints = relativeWaypoints
-                .filter(rel => rel.t !== undefined && rel.offset !== undefined) // Only use relative format
-                .map(rel => relativeToAbsolute(rel, segment.s1, segment.s2));
+                .filter(rel => rel.t !== undefined && rel.offset !== undefined &&
+                               typeof rel.t === 'number' && typeof rel.offset === 'number' &&
+                               !isNaN(rel.t) && !isNaN(rel.offset)) // Only use valid relative format
+                .map(rel => relativeToAbsolute(rel, segment.s1, segment.s2))
+                .filter(wp => wp && typeof wp.x === 'number' && typeof wp.y === 'number' &&
+                              !isNaN(wp.x) && !isNaN(wp.y) && isFinite(wp.x) && isFinite(wp.y)); // Validate absolute coords
 
             // Build the path through all waypoints
             const points = [
@@ -1863,10 +1875,17 @@ function resetAllWaypoints() {
         return;
     }
 
-    // Clear all existing waypoints
-    segmentWaypoints.clear();
+    // Clear all existing waypoints from memory
+    segmentWaypoints = new Map();
 
-    saveWaypoints();
+    // Clear from localStorage directly
+    try {
+        localStorage.removeItem('segmentWaypoints');
+        console.log('[Diagram] Waypoints cleared from localStorage');
+    } catch (e) {
+        console.warn('[Diagram] Failed to clear waypoints from localStorage:', e);
+    }
+
     renderDiagram();
     alert('ドラッグポイントをクリアしました');
 }
@@ -2241,10 +2260,14 @@ function findNearestSegment(x, y, segments) {
     segments.forEach((segment, segmentKey) => {
         const relativeWaypoints = segmentWaypoints.get(segmentKey) || [];
 
-        // Convert waypoints from relative to absolute coordinates (only use relative format)
+        // Convert waypoints from relative to absolute coordinates (only use valid relative format)
         const waypoints = relativeWaypoints
-            .filter(rel => rel.t !== undefined && rel.offset !== undefined)
-            .map(rel => relativeToAbsolute(rel, segment.s1, segment.s2));
+            .filter(rel => rel.t !== undefined && rel.offset !== undefined &&
+                           typeof rel.t === 'number' && typeof rel.offset === 'number' &&
+                           !isNaN(rel.t) && !isNaN(rel.offset))
+            .map(rel => relativeToAbsolute(rel, segment.s1, segment.s2))
+            .filter(wp => wp && typeof wp.x === 'number' && typeof wp.y === 'number' &&
+                          !isNaN(wp.x) && !isNaN(wp.y) && isFinite(wp.x) && isFinite(wp.y));
 
         // Build the path through all waypoints
         const points = [
