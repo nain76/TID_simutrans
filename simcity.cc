@@ -640,8 +640,16 @@ void stadt_t::remove_gebaeude_from_stadt(gebaeude_t* gb)
 // just updates the weight count of this building (after a renovation)
 void stadt_t::update_gebaeude_from_stadt(gebaeude_t* gb)
 {
-	bool ok = buildings.remove(gb);
-	assert(ok);
+	if(  !buildings.remove(gb)  ) {
+		// building was not in our list (e.g. it belonged to a neighbouring city)
+		dbg->warning("stadt_t::update_gebaeude_from_stadt()", "building at (%s) not in building list of %s", gb->get_pos().get_str(), get_name());
+		stadt_t *other = gb->get_stadt();
+		if(  other  &&  other != this  ) {
+			other->buildings.remove(gb);
+			other->recalc_city_size();
+		}
+		gb->set_stadt(this);
+	}
 	buildings.append(gb, gb->get_tile()->get_desc()->get_level() + 1);
 }
 
@@ -3448,7 +3456,8 @@ void stadt_t::build_city_building(const koord k)
 				// We really have a building as a neighbor...
 				const building_desc_t* neighbor_building = gb->get_tile()->get_desc();
 				neighbor_building_clusters |= neighbor_building->get_clusters();
-				if(  gb->get_pos().z == zpos  &&  neighbor_building->get_x()*neighbor_building->get_y()==1  ) {
+				// only replace buildings of this city (otherwise update_gebaeude_from_stadt() fails)
+				if(  gb->get_pos().z == zpos  &&  neighbor_building->get_x()*neighbor_building->get_y()==1  &&  gb->get_stadt()==this  ) {
 					// also in right height and citybuilding, and (1x1) (so we don not tear down existing larger building, even if we can do that)
 					area_level |= (neighbor_building->is_city_building() << i);
 				}
@@ -3473,7 +3482,7 @@ void stadt_t::build_city_building(const koord k)
 						if(  gebaeude_t const* const testgb = obj_cast<gebaeude_t>(gr->first_obj())  ) {
 							// We really have a building as a neighbor...
 							const building_desc_t* neighbor_building = testgb->get_tile()->get_desc();
-							if(  testgb->get_pos().z == zpos  &&  neighbor_building->is_city_building()  &&  neighbor_building->get_x()*neighbor_building->get_y()==1  ) {
+							if(  testgb->get_pos().z == zpos  &&  neighbor_building->is_city_building()  &&  neighbor_building->get_x()*neighbor_building->get_y()==1  &&  testgb->get_stadt()==this  ) {
 								// also in right height and citybuilding
 								maxsize = area3x3[area_level]+koord((sint16)1,(sint16)1);
 								continue;
@@ -3607,8 +3616,8 @@ void stadt_t::renovate_city_building(gebaeude_t *gb)
 							maxsize = area3x3[ area_level ] + koord( 1, 1 );
 							continue;
 						}
-						if(  testgb->get_pos().z == zpos   &&   neighbor_building->get_x()*neighbor_building->get_y() == 1 ) {
-							// also in right height and citybuilding
+						if(  testgb->get_pos().z == zpos   &&   neighbor_building->get_x()*neighbor_building->get_y() == 1  &&  testgb->get_stadt() == this  ) {
+							// also in right height and citybuilding of this city
 							maxsize = area3x3[ area_level ] + koord( 1, 1 );
 							continue;
 						}
