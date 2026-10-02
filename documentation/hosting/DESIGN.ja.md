@@ -1,399 +1,368 @@
-# Simutrans OTRP サーバ間借りサービス 設計書（ドラフト v0.1）
+# Simutrans OTRP サーバ間借りサービス 設計書（ドラフト v0.2）
 
-> 目的: 「自分ではサーバを立てられない人」が、Web 画面から数クリックで
+> 目的: 「自分ではサーバを立てられない人」が、Discord から数コマンドで
 > Simutrans OTRP のマルチプレイサーバを立て、仲間と遊べるようにする。
+
+## 0. 決定事項・方針（v0.2）
+
+| 項目 | 決定 / 方針 | 状態 |
+|---|---|---|
+| 予算 | 当面 **¥0** | 決定 |
+| 対象 | 日本国内のみ（海外対応しない） | 決定 |
+| スペック | 最低限動けばよい（小〜中マップ、同時稼働は数台） | 決定 |
+| 操作 UI | **Discord Bot を主にする**。Web は作らない（必要になったら後から追加） | 提案 |
+| インフラ | **Oracle Cloud Always Free（東京/大阪）1台**。ダメなら国内 VPS（月 ¥1,000 前後）へ移行 | 提案 |
+| 構成 | **1台に全部入り**（Bot・DB・ゲームサーバ） | 提案 |
+| DB | **SQLite**（1台構成なら DB サーバ不要） | 提案 |
+| pakset | 標準インストーラ（`get_pak.sh`）で取れるものを初期搭載。それ以外は運営が追加 | 決定 |
+| OTRP バージョン | **基本は最新版のみ**。切り替えの移行期間だけ 1つ前も残す | 決定 |
+| 言語 | **Python**（discord.py） | 提案 |
+| リポジトリ | サービス用に**新しいリポジトリを作る** | 提案 |
+| 認証 | Discord アカウントをそのまま使う（Bot 方式なら別途ログイン機能は不要） | 提案 |
 
 ---
 
 ## 1. 前提整理（Simutrans サーバの性質）
 
-設計を左右する Simutrans 側の制約を先にまとめる。
-
 | 性質 | 内容 | 設計への影響 |
 |---|---|---|
 | 1プロセス = 1ゲーム | `sim -server <port>` で起動。1プロセスで1マップのみ | ゲームごとにコンテナ1つ |
-| 1ゲーム = 1 TCP ポート | 既定 13353。HTTP の SNI のような振り分けは不可 | **ノードごとにポートを払い出す**必要あり |
-| ヘッドレス可能 | `BACKEND=posix` でビルドすると描画無し（`COLOUR_DEPTH=0`）、画像もメモリに載らない | サーバ専用ビルドを用意（GPU/X 不要） |
-| ほぼシングルスレッド | 同期型（lockstep）。サーバが遅れると全員が遅れる | **CPU のシングルコア性能**が重要。vCPU を過剰に詰め込まない |
-| メモリはマップサイズ依存 | 目安: 256² で数百MB、1024² で1〜2GB、それ以上は数GB | プラン（マップ上限）でメモリ上限を決める |
-| バージョン完全一致が必須 | クライアントとサーバの OTRP バージョン・pakset が一致しないと接続不可 | **バイナリのバージョン管理**と pakset 管理が DB の中心 |
-| セーブ = 唯一の永続データ | `autosave`、`server_save_game_on_quit=1`（SIGTERM 時に保存） | セーブをオブジェクトストレージへ退避すればコンテナは使い捨てにできる |
-| 誰もいない時は止められる | `pause_server_no_clients=1` | 無人時の CPU 消費を抑えられる → 詰め込み密度が上がる |
-| 遠隔管理 | `nettool`（kick/ban/say/shutdown/force-sync/lock-company 等）、`-server_admin_pw` | Web 管理画面から nettool 相当を叩く |
-| 公開リスト | `server_announce=1` で servers.simutrans.org に掲載 | サーバごとに公開/非公開を選択 |
+| 1ゲーム = 1 TCP ポート | 既定は 13353。HTTP のように同じポートで振り分けることはできない | サーバごとにポートを割り当てる |
+| 画面なしで動かせる | `BACKEND=posix` でビルドすると描画無し、画像もメモリに載らない | サーバ専用ビルドを用意（GPU/X 不要） |
+| ほぼシングルスレッド | 同期型（lockstep）。サーバが遅れると全員が遅れる | vCPU の数より 1コアの性能が重要 |
+| メモリはマップサイズ次第 | 目安: 256² で数百MB、1024² で1〜2GB | プランでマップサイズの上限を決める |
+| バージョン完全一致が必須 | クライアントとサーバの OTRP 版・pakset が一致しないと接続不可（pakset は接続時にチェックサムを比較） | バージョンと pakset の管理が中心 |
+| セーブ = 唯一の永続データ | `autosave`、`server_save_game_on_quit=1`（SIGTERM で終了するときに保存） | セーブだけ守ればコンテナは使い捨てにできる |
+| 無人なら止められる | `pause_server_no_clients=1` | 無人時の CPU 消費を抑えられる |
+| 遠隔管理 | `nettool`（clients/kick/ban/say/shutdown/force-sync/lock-company 等）、`-server_admin_pw` | Bot から nettool 相当を呼ぶ |
 
-**注意点（OTRP 固有）**
-- `network/otrp_log_sender.cc` は `env_t::otrp_statistics_log` が空でなければ起動時に外部へ HTTP 送信する
-  （既定は空。値はユーザーディレクトリの設定ファイルに保存される）。
-  ホスティング環境では毎回まっさらな設定で起動し、空のままであることを保証する。
-- `OTRP_VERSION_MAJOR` が変わるとセーブ互換が切れる。サーバ作成時に選んだバージョンを固定し、
-  アップグレードは利用者の明示操作にする。
+**OTRP 固有の注意点**: `network/otrp_log_sender.cc` は `env_t::otrp_statistics_log` が空でなければ、起動時に外部へ HTTP 送信する（既定は空）。ホスティング環境では毎回まっさらな設定で起動し、空のままであることを保証する。
 
 ---
 
-## 2. 全体アーキテクチャ
+## 2. 操作 UI: Discord Bot と Web サイトの比較
 
-```
-                ┌───────────────────────────────────────────┐
-  利用者(ブラウザ) │  Web ポータル（管理画面）                     │
-  ───────────────▶│  ログイン / サーバ作成 / 起動停止 / セーブDL    │
-                └──────────────┬────────────────────────────┘
-                               │ HTTPS (REST)
-                ┌──────────────▼────────────────────────────┐
-                │  コントロールプレーン API                      │
-                │  ・認証(Discord OAuth)  ・権限               │
-                │  ・スケジューラ(どのノードに置くか)             │
-                │  ・ジョブキュー(起動/停止/バックアップ)         │
-                └───┬──────────────┬──────────────┬─────────┘
-                    │              │              │
-             ┌──────▼─────┐  ┌─────▼──────┐  ┌────▼──────────────┐
-             │ PostgreSQL │  │ オブジェクト  │  │ ゲームノード(VPS) × N │
-             │ (メタデータ) │  │ ストレージ   │  │ ┌──────────────┐  │
-             └────────────┘  │ セーブ/pak   │◀─┤ │ node-agent    │  │
-                             └────────────┘  │ │ (Docker 操作)  │  │
-                                             │ ├──────────────┤  │
-  プレイヤー(Simutrans クライアント)            │ │ sim コンテナ ×M │  │
-  ──────── TCP host:13353〜 ─────────────────▶│ └──────────────┘  │
-                                             └───────────────────┘
-```
-
-### コンポーネント
-
-| コンポーネント | 役割 | 技術候補（推奨） |
+| 観点 | Discord Bot | Web サイト |
 |---|---|---|
-| Web ポータル | UI | SvelteKit or Next.js（静的配信可なら Cloudflare Pages） |
-| API | 認証・CRUD・スケジューリング・ジョブ | **Go**（単一バイナリで運用が楽、agent と言語統一） |
-| node-agent | 各ノードで常駐。API からの指示でコンテナ起動/停止、セーブ監視・アップロード、nettool 中継、メトリクス報告 | Go + Docker Engine API |
-| ゲームコンテナ | `sim -server` を実行 | OTRP posix ビルドの Docker イメージ（バージョンごとにタグ） |
-| DB | メタデータ | PostgreSQL 16 |
-| オブジェクトストレージ | セーブ、バックアップ、pakset 配布物 | **Cloudflare R2**（転送料無料）/ S3 互換なら何でも可 |
-| 監視 | 死活・リソース | Prometheus + Grafana（小規模なら Uptime Kuma）、Discord Webhook 通知 |
+| ログイン機能 | **不要**（Discord が本人確認済み） | OAuth・セッション管理・CSRF 対策などを自前で実装 |
+| 画面作成 | **不要**（スラッシュコマンド・ボタン・選択メニュー） | HTML/CSS/JS の画面一式 |
+| 公開に必要なもの | **なし**（Bot から Discord へ外向きに接続するだけ） | ドメイン、HTTPS 証明書、Web サーバの公開 |
+| 通知 | **標準でできる**（チャンネル投稿・DM） | 別途メールや Webhook が必要 |
+| セーブのアップロード | 添付ファイル（**無料ユーザーは 10MB まで**） | 大きなファイルも扱える |
+| 凝った表示（グラフ等） | 苦手 | 得意 |
+| 対象ユーザーとの相性 | 日本の Simutrans コミュニティは Discord 中心 | — |
 
-agent ↔ API の通信は **agent からの outbound 接続（ポーリング or WebSocket）** にする。
-ノード側で管理ポートを開けずに済み、ファイアウォールはゲーム用ポート範囲のみ公開でよい。
+**結論: Web サイトの方がずっと重い。最初は Discord Bot で作る。**
+10MB を超えるセーブのアップロードだけは、Bot が発行する「期限付きアップロード URL」で対応する（小さな受付用エンドポイント1本のみ、P2 以降）。
 
----
+### コマンド案
 
-## 3. クラウド/インフラ選定
+| コマンド | 内容 | 誰が使えるか |
+|---|---|---|
+| `/server create name: pak: size:` | サーバ作成（空マップのテンプレートから） | 誰でも（上限あり） |
+| `/server import name: pak: file:` | セーブを添付して作成 | 誰でも（上限あり） |
+| `/server start` / `/server stop` | 起動 / 停止（停止時に自動でセーブ） | owner, admin |
+| `/server info` | 接続先 `host:port`、状態、必要なクライアント版・pak の案内 | メンバー |
+| `/server save` / `/server saves` | 手動セーブ / セーブ一覧・ダウンロードリンク | owner, admin |
+| `/server rollback save:` | 指定したセーブから再開 | owner |
+| `/server players` | 接続中プレイヤー一覧 | メンバー |
+| `/server kick` / `ban` / `say` / `unlock-company` | nettool 相当 | owner, admin |
+| `/server member add/remove` | 共同管理者の追加・削除 | owner |
+| `/server delete` | 削除（確認ボタン付き） | owner |
+| `/admin ...` | 運営用（全サーバ一覧、強制停止、pak 追加、ユーザー BAN） | 運営ロール |
 
-### 評価軸
-1. **月額の予測可能性**（趣味の共同運営なので従量課金の青天井は避けたい）
-2. **日本からのレイテンシ**（lockstep なので 100ms を超えると体感が悪化）
-3. **転送量課金の有無**（セーブ配布・pak 配布で地味に効く）
-4. **シングルコア性能**
-
-### 候補比較
-
-| 候補 | 月額目安 | 日本リージョン | 転送料 | 評価 |
-|---|---|---|---|---|
-| **国内 VPS**（さくらの VPS / ConoHa VPS / Xserver VPS / KAGOYA 等） | 4〜8GB で ¥2,000〜5,000 | ◎ | 基本無料 | **本番の第一推奨**。定額・低遅延・転送無料 |
-| **Oracle Cloud Always Free**（Ampere A1: 4 OCPU / 24GB） | ¥0 | ◎（東京/大阪） | 10TB/月無料 | **検証・初期運用に最適**。ただし ARM ビルド必須、無料枠の在庫切れ・アカウント停止リスクあり |
-| Hetzner Cloud | 安い（CPX/CAX） | ✕（最寄りはシンガポール） | ほぼ無料 | 安いが日本から遅延 70ms 前後。海外ユーザー向けなら有力 |
-| AWS / GCP / Azure | 常時稼働だと高い | ◎ | **高い** | 本用途には不向き（Spot 等で工夫すれば可だが複雑） |
-| Fly.io / Railway 等 PaaS | 中 | △ | 有料 | 任意 TCP ポート・長時間プロセスに不向きな部分あり |
-
-### 推奨構成
-
-- **フェーズ1（検証〜少人数）**: Oracle Cloud Free（ARM）1台に API・DB・agent・ゲームを同居。費用 ¥0。
-- **フェーズ2（一般公開）**: 国内 VPS を「コントロール用 1台（小）」＋「ゲームノード N 台（4〜8GB）」に分離。
-- **共通**: オブジェクトストレージは Cloudflare R2（10GB まで無料、転送料無料）。
-  DB は自前 PostgreSQL（コントロール VPS 上）＋日次ダンプを R2 へ。
-  マネージドにしたいなら Neon / Supabase の無料枠も可。
-
-> どのクラウドでも動くよう、**ノードは「Docker が動く Linux VM」以上の前提を置かない**。
-> これによりベンダーロックインを避け、寄付ノード（協力者の VPS を agent で参加させる）も将来可能。
+サーバ作成・ファイルの受け渡しは、Bot を導入した**専用 Discord サーバ（ギルド）内**に限定する。どのギルドからでも使える形にするかは後で判断する。
 
 ---
 
-## 4. データベース設計
-
-### ER 概要
+## 3. 全体アーキテクチャ（最小構成: 1台）
 
 ```
-users ─┬─< oauth_accounts
-       ├─< servers >── game_versions
-       │      │   >── paksets
-       │      │   >── nodes
-       │      ├─< server_members >── users
-       │      ├─< savegames
-       │      ├─< server_events (監査ログ)
-       │      └── port_allocations
-       └─< quotas / plans
-nodes ─< port_allocations
-jobs (非同期処理キュー)
+ Discord ユーザー ──(スラッシュコマンド)──▶ Discord
+                                            ▲
+                                            │ 外向き WebSocket（受け口の公開は不要）
+ ┌──────────────────────────────────────────┼─────────────────┐
+ │ VM 1台（Oracle Free ARM / 国内 VPS）      │                 │
+ │                                          │                 │
+ │  ┌───────────────────────────────────────┴─────┐           │
+ │  │ hosting-bot（Python, 常駐）                  │           │
+ │  │  ・コマンド処理・権限チェック                 │           │
+ │  │  ・Docker 操作（起動/停止）                   │           │
+ │  │  ・定期処理（無人なら休止、バックアップ）      │           │
+ │  │  ・nettool 呼び出し                          │           │
+ │  └──────┬──────────────────┬───────────────────┘           │
+ │         │                  │ Docker API                    │
+ │   ┌─────▼─────┐   ┌────────▼───────────────────────┐       │
+ │   │ SQLite    │   │ sim コンテナ ×M（ポート 13400〜）│◀──────┼── Simutrans クライアント
+ │   └───────────┘   └────────────────────────────────┘       │   TCP host:port
+ │   /srv/simu/paks（共有・読み取り専用）  /srv/simu/servers/<id>/  │
+ └──────────────────────────────────────────────────────────────┘
+         │ 日次バックアップ（DB + セーブ）
+         ▼
+   オブジェクトストレージ（Oracle Object Storage 無料 20GB / Cloudflare R2 無料 10GB）
 ```
 
-### テーブル定義（PostgreSQL）
+- 1台構成なので、**ノード管理・スケジューラ・ジョブキュー・agent は作らない**（Bot が直接 Docker を操作する）。
+- 将来複数台にする場合は、Bot から Docker 操作部分を「agent」として切り出す。最初から関数単位で分けておく。
+
+---
+
+## 4. インフラ選定（予算 ¥0 前提）
+
+### 無料で使える候補
+
+| 候補 | スペック | 日本 | 評価 |
+|---|---|---|---|
+| **Oracle Cloud Always Free** | ARM 最大 4コア / 24GB、ディスク 200GB、Object Storage 20GB、転送 10TB/月 | ◎ 東京・大阪 | **ほぼ唯一の現実解**。下記の手間あり |
+| AWS / Azure 無料枠 | 1GB 程度、期間限定（クレジット制など） | ○ | 期限が切れると有料、1GB では厳しい |
+| Google Cloud 無料枠 | e2-micro 1GB | ✕（米国リージョンのみ） | 遅延が大きく不可 |
+| 自宅サーバ | 手元の PC / ラズパイ | ◎ | 電気代のみ。ポート開放と固定 IP/DDNS が必要で、自宅 IP が公開される |
+
+### Oracle の「面倒くささ」と対策
+
+| 面倒な点 | 対策 |
+|---|---|
+| 登録時にクレジットカード認証が必要 | 課金されないことを確認済みの上で登録（無料枠の範囲内なら請求なし） |
+| ARM インスタンスが「Out of capacity」で作れないことがある | 時間を置いて再試行 / 大阪リージョンも試す / 最初は 2コア 12GB など小さめで作る |
+| **アイドル状態が続くとインスタンスを回収される**（Always Free の仕様。CPU 等の使用率が7日間低いと対象） | 「従量課金（PAYG）アカウント」へアップグレードすると回収対象外（無料枠内なら ¥0 のまま）。**要: 最新規約の確認** |
+| ARM（arm64）なのでバイナリを ARM 用にビルドする必要がある | Simutrans は ARM でも普通にビルドできる。Docker イメージを amd64/arm64 両対応で作る |
+| 管理画面（VCN、セキュリティリスト）がわかりにくい | 開けるのは SSH とゲーム用ポート範囲のみなので、設定手順を一度手順書化すれば済む |
+
+### 推奨
+
+1. **まず Oracle Always Free（東京）**で 4コア / 24GB の ARM VM を1台作る。インフラエンジニアなら手順自体は難しくない。
+2. 取れなかった・運用が嫌になった場合の**逃げ先は国内 VPS の最小プラン**（2GB で月 ¥1,000 前後。小マップ 2〜3 サーバ程度）。
+3. どちらでも動くよう、前提は「**Docker が動く Linux 1台**」だけにする（クラウド固有サービスに依存しない）。
+4. バックアップ先は、Oracle を使うなら同じ Oracle の Object Storage（無料 20GB）。VPS へ移った場合は Cloudflare R2（無料 10GB）。どちらも S3 互換 API で扱えるので、コードは共通にする。
+
+### 収容数の目安（24GB / 4コア）
+
+- 1サーバ 1〜2GB 上限 → **同時稼働 8〜10 サーバ程度**（CPU が先に限界になる想定）。
+- 休止機能により、**登録サーバ数はその数倍**を受け入れられる。
+
+---
+
+## 5. データ設計（SQLite）
+
+1台構成なので SQLite で十分。ファイル1つなのでバックアップはファイルをコピーするだけ。
+複数台にする段階で PostgreSQL へ移行する（テーブル構成はそのまま移せるようにしておく）。
 
 ```sql
--- 利用者
+-- 利用者（Discord ユーザー）
 CREATE TABLE users (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  display_name  TEXT NOT NULL,
-  plan_id       TEXT NOT NULL DEFAULT 'free' REFERENCES plans(id),
-  is_admin      BOOLEAN NOT NULL DEFAULT false,   -- 運営者
-  banned_at     TIMESTAMPTZ,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  discord_id   TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  is_operator  INTEGER NOT NULL DEFAULT 0,       -- 運営
+  banned_at    TEXT,
+  created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE oauth_accounts (
-  provider      TEXT NOT NULL,                    -- 'discord' 等
-  provider_uid  TEXT NOT NULL,
-  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  PRIMARY KEY (provider, provider_uid)
-);
-
--- プラン（＝ 1ユーザーが使える資源の上限）
-CREATE TABLE plans (
-  id                  TEXT PRIMARY KEY,           -- 'free', 'supporter' ...
-  max_servers         INT NOT NULL,
-  max_running_servers INT NOT NULL,
-  max_memory_mb       INT NOT NULL,               -- 1サーバあたり
-  max_map_tiles       INT NOT NULL,               -- 幅×高さ の上限
-  max_savegame_slots  INT NOT NULL,
-  idle_hibernate_min  INT NOT NULL                -- 無人で何分経ったら休止するか
-);
-
--- ゲームノード（VM）
-CREATE TABLE nodes (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  hostname        TEXT NOT NULL,                  -- プレイヤーに見せる接続先(FQDN)
-  public_ip       INET NOT NULL,
-  arch            TEXT NOT NULL,                  -- 'amd64' | 'arm64'
-  region          TEXT NOT NULL,                  -- 'jp-tokyo' 等
-  total_memory_mb INT NOT NULL,
-  total_cpu_milli INT NOT NULL,
-  port_range_lo   INT NOT NULL DEFAULT 13400,
-  port_range_hi   INT NOT NULL DEFAULT 13499,
-  status          TEXT NOT NULL DEFAULT 'active', -- active | draining | offline
-  agent_token_hash TEXT NOT NULL,
-  last_heartbeat  TIMESTAMPTZ
-);
-
--- ゲームバイナリ（OTRP のバージョン × アーキテクチャ）
+-- ゲームバイナリ（最新＋移行期間中の1つ前）
 CREATE TABLE game_versions (
-  id            TEXT PRIMARY KEY,                 -- 'otrp-v50.2'
-  otrp_version  TEXT NOT NULL,                    -- '50.2'
-  sim_version   TEXT NOT NULL,                    -- '122.0.1'
-  image_ref     TEXT NOT NULL,                    -- 'ghcr.io/xxx/otrp-server:v50.2'
-  client_download_url TEXT,                       -- 利用者に案内するクライアント
-  is_default    BOOLEAN NOT NULL DEFAULT false,
-  deprecated_at TIMESTAMPTZ
+  id           TEXT PRIMARY KEY,                  -- 'otrp-v50.2'
+  otrp_version TEXT NOT NULL,
+  image_ref    TEXT NOT NULL,                     -- 'ghcr.io/xxx/otrp-server:v50.2'
+  client_url   TEXT,                              -- クライアント入手先の案内
+  status       TEXT NOT NULL DEFAULT 'current',   -- current | previous | retired
+  released_at  TEXT NOT NULL
 );
 
--- pakset（運営が用意したもののみ。ユーザー持ち込みは将来）
+-- pakset
 CREATE TABLE paksets (
-  id            TEXT PRIMARY KEY,                 -- 'pak128.japan-2024xx'
-  name          TEXT NOT NULL,
-  version       TEXT NOT NULL,
-  storage_key   TEXT NOT NULL,                    -- R2 上の配置
-  sha256        TEXT NOT NULL,
-  size_bytes    BIGINT NOT NULL,
-  download_url  TEXT,                             -- クライアント用の入手先案内
-  addons_allowed BOOLEAN NOT NULL DEFAULT false
+  id          TEXT PRIMARY KEY,                   -- 'pak64-122-0'
+  name        TEXT NOT NULL,                      -- 表示名
+  source      TEXT NOT NULL,                      -- 'installer'（標準インストーラ）| 'manual'（運営追加）
+  source_url  TEXT NOT NULL,                      -- 取得元 / クライアントへの案内
+  sha256      TEXT NOT NULL,
+  local_path  TEXT NOT NULL,                      -- /srv/simu/paks/<id>
+  enabled     INTEGER NOT NULL DEFAULT 1
 );
 
--- ゲームサーバ（＝利用者が作る「部屋」）
+-- ゲームサーバ
 CREATE TABLE servers (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  owner_id        UUID NOT NULL REFERENCES users(id),
+  id              TEXT PRIMARY KEY,               -- 短い ID（例 'a7k2'）
+  owner_id        TEXT NOT NULL REFERENCES users(discord_id),
   name            TEXT NOT NULL,
   game_version_id TEXT NOT NULL REFERENCES game_versions(id),
   pakset_id       TEXT NOT NULL REFERENCES paksets(id),
-  node_id         UUID REFERENCES nodes(id),      -- 休止中は NULL 可
-  port            INT,                            -- 休止中は NULL 可
-  status          TEXT NOT NULL DEFAULT 'created',-- 下記ステートマシン参照
-  desired_status  TEXT NOT NULL DEFAULT 'stopped',-- running | stopped（agent の収束目標）
-  memory_limit_mb INT NOT NULL,
-  settings        JSONB NOT NULL DEFAULT '{}',    -- simuconf 上書き値（ホワイトリスト）
-  admin_pw_enc    BYTEA NOT NULL,                 -- nettool 用。KMS/鍵で暗号化
-  join_password_enc BYTEA,                        -- 任意（参加パスワード運用時）
-  announce        BOOLEAN NOT NULL DEFAULT false, -- 公開リスト掲載
-  current_save_id UUID,                           -- 次回起動時に読むセーブ
-  last_player_seen_at TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at      TIMESTAMPTZ
+  port            INTEGER UNIQUE,                 -- 13400〜13499。休止中も保持して接続先を固定
+  status          TEXT NOT NULL DEFAULT 'stopped',-- stopped | starting | running | stopping | error
+  memory_limit_mb INTEGER NOT NULL,
+  settings_json   TEXT NOT NULL DEFAULT '{}',     -- simuconf 上書き（ホワイトリストのキーのみ）
+  admin_pw        TEXT NOT NULL,                  -- nettool 用（ランダム生成、利用者には見せない）
+  announce        INTEGER NOT NULL DEFAULT 0,     -- 公開リストへの掲載
+  current_save_id TEXT,
+  last_player_seen_at TEXT,
+  created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE server_members (
-  server_id UUID REFERENCES servers(id) ON DELETE CASCADE,
-  user_id   UUID REFERENCES users(id)   ON DELETE CASCADE,
-  role      TEXT NOT NULL,                        -- owner | admin | viewer
+  server_id TEXT REFERENCES servers(id) ON DELETE CASCADE,
+  user_id   TEXT REFERENCES users(discord_id),
+  role      TEXT NOT NULL,                        -- owner | admin | member
   PRIMARY KEY (server_id, user_id)
 );
 
--- ポート払い出し（ノード内で一意）
-CREATE TABLE port_allocations (
-  node_id   UUID REFERENCES nodes(id),
-  port      INT,
-  server_id UUID UNIQUE REFERENCES servers(id),
-  PRIMARY KEY (node_id, port)
-);
-
--- セーブデータ（実体は R2）
+-- セーブ（実体は /srv/simu/servers/<id>/saves/ と、バックアップ先）
 CREATE TABLE savegames (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  server_id    UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
-  kind         TEXT NOT NULL,                     -- auto | manual | upload | on_stop
-  storage_key  TEXT NOT NULL,
-  size_bytes   BIGINT NOT NULL,
-  sha256       TEXT NOT NULL,
-  savegame_ver TEXT,                              -- 例 '0.122.0.50'（互換チェック用）
-  game_date    TEXT,                              -- ゲーム内年月（表示用）
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  id          TEXT PRIMARY KEY,
+  server_id   TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,                      -- auto | manual | upload | on_stop
+  path        TEXT NOT NULL,
+  size_bytes  INTEGER NOT NULL,
+  sha256      TEXT NOT NULL,
+  game_version_id TEXT,                           -- どの版で作ったか（互換チェック）
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 非同期ジョブ（起動・停止・バックアップ・移設 等）
-CREATE TABLE jobs (
-  id          BIGSERIAL PRIMARY KEY,
-  kind        TEXT NOT NULL,
-  server_id   UUID REFERENCES servers(id),
-  node_id     UUID REFERENCES nodes(id),
-  payload     JSONB NOT NULL DEFAULT '{}',
-  state       TEXT NOT NULL DEFAULT 'queued',     -- queued | running | done | failed
-  attempts    INT NOT NULL DEFAULT 0,
-  last_error  TEXT,
-  run_after   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- 監査ログ（誰が kick/ban/停止したか 等）
-CREATE TABLE server_events (
-  id         BIGSERIAL PRIMARY KEY,
-  server_id  UUID REFERENCES servers(id) ON DELETE CASCADE,
-  actor_id   UUID REFERENCES users(id),
-  kind       TEXT NOT NULL,
-  detail     JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- 監査ログ（誰が何をしたか）
+CREATE TABLE events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_id  TEXT,
+  actor_id   TEXT,
+  kind       TEXT NOT NULL,                       -- create / start / kick / ban / delete ...
+  detail     TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-ジョブキューは最初は PostgreSQL の `SELECT ... FOR UPDATE SKIP LOCKED` で十分（Redis 不要）。
+**制限値（初期案。設定ファイルで変更可）**
+
+| 項目 | 値 |
+|---|---|
+| 1人あたりの所有サーバ数 | 2 |
+| 全体の同時稼働数 | 8 |
+| マップ上限 | 512×512（メモリ上限 1.5GB） |
+| 無人で休止するまで | 30分 |
+| 保持するセーブ数 | 1サーバあたり 自動 5 + 手動 5 |
+| 未使用サーバの自動削除 | 90日起動なし → 警告 DM → 14日後に削除 |
 
 ---
 
-## 5. サーバのライフサイクル
+## 6. サーバのライフサイクル
 
 ```
- created ──start──▶ provisioning ──▶ starting ──▶ running ◀──┐
-                                                   │   │      │ wake(Web ボタン)
-                                         stop(手動)│   │無人が N 分継続
-                                                   ▼   ▼      │
-                                               stopping ──▶ hibernated
-                                                   │
-                                                 error（再試行 / 運営通知）
+ (create) ─▶ stopped ──/server start──▶ starting ──▶ running
+                ▲                                     │
+                │          /server stop、または        │
+                └──── stopping ◀── 無人が 30分続いた ──┘
+                         （SIGTERM → 停止時セーブ → 保存）
 ```
 
-- **起動**: スケジューラが空きのあるノード（arch 一致・メモリ空き・ポート空き）を選択
-  → agent がセーブと pak をノードのキャッシュから（無ければ R2 から）取得 → コンテナ起動。
-- **停止/休止**: agent が `SIGTERM`（`server_save_game_on_quit=1`）→ 生成セーブを R2 へアップロード
-  → `savegames` 登録 → ポート解放。**休止中は DB と R2 にしか存在しない**ので、ノード資源を消費しない。
-- **休止の判断**: agent が nettool の `clients` 相当で接続数を定期取得し、`last_player_seen_at` を更新。
-  プランの `idle_hibernate_min` を超えたら休止ジョブを投入。
-  → これが「間借り」を安く成立させる最大のポイント（常時稼働は全体の一部だけになる）。
-- **再開時のポート**: ポート/ノードが変わり得るため、接続先は `servers.<id短縮>.example.jp` のような
-  サーバ固有 DNS 名 + 案内ポートで見せる（DNS は Cloudflare API で更新）。
+- **ポートは作成時に割り当てて固定**し、停止中も保持する（1台構成なので接続先が変わらない）。100 ポートで 100 サーバまで登録可能。
+- 停止中はコンテナが存在しないので、メモリも CPU も使わない。
+- 無人判定: Bot が数分おきに nettool `clients` で接続数を確認し、`last_player_seen_at` を更新する。
+- 「起動して」と言われたときに同時稼働数の上限に達していたら、断って待ってもらう（順番待ちは作らない）。
 
 ---
 
-## 6. ゲームコンテナ仕様
+## 7. ゲームコンテナ
 
-- イメージ: `otrp-server:<OTRP version>-<arch>`。マルチステージビルドで
-  `BACKEND=posix`, `MULTI_THREAD=1`, `STATIC=1`（もしくは slim 実行環境）。
-- 配置:
-  - `/opt/simutrans/`（バイナリ・base 資源、読み取り専用）
-  - `/paks/<pakset_id>/`（ノード共有キャッシュを read-only マウント → 同じ pak を複数サーバで共有）
-  - `/data/`（そのサーバ専用。セーブ、`simuconf.tab` 上書き、ログ）
+- イメージ: `otrp-server:<OTRP版>`（amd64 / arm64 両対応）。`BACKEND=posix`、`MULTI_THREAD=1` でビルド。
+- マウント:
+  - `/paks/<pakset_id>` ← `/srv/simu/paks/<id>`（読み取り専用。全サーバで共有）
+  - `/data` ← `/srv/simu/servers/<id>`（セーブ、生成した `simuconf.tab`）
 - 起動例:
   ```
   sim -server $PORT -objects <pak> -load /data/save/current.sve \
       -server_admin_pw $ADMIN_PW -singleuser -use_workdir
   ```
-- `settings` JSONB → 生成する `simuconf.tab` のキーは**ホワイトリスト制**
-  （`server_frames_ahead`, `pause_server_no_clients`, `server_name`, `server_comments`,
-  `autosave`, 経済系パラメータ 等）。任意キーは許可しない。
-- 強制値: `server_save_game_on_quit=1`、`pause_server_no_clients=1`（既定）。
+- 強制する設定: `server_save_game_on_quit=1`、`pause_server_no_clients=1`。
+- 制限: 非 root 実行、`--read-only`、`--cap-drop=ALL`、`--memory`、`--cpus=1`、`--pids-limit`。
+- 外向き通信は原則遮断する（公開リスト掲載時のみ許可）。
+- **アップロードされたセーブは C++ の読み込み処理にそのまま渡る**ため、悪意あるファイルを想定し、コンテナ分離を必須とする。
 
-### 分離・セキュリティ
-- 非 root ユーザー、`--read-only` ルート FS、`--cap-drop=ALL`、`--pids-limit`、
-  cgroup で `--memory` / `--cpus` 制限。
-- ネットワーク: inbound は割当ポートのみ。outbound は原則遮断
-  （公開リスト掲載時のみ servers.simutrans.org への HTTP を許可）。
-- **ユーザーがアップロードしたセーブは C++ のパーサに入る**ため、悪意あるファイルによる
-  脆弱性悪用を想定してコンテナ分離を前提とする。ユーザー持ち込み pak は初期は不可
-  （将来対応する場合は gVisor 等のサンドボックスを追加）。
-- 管理パスワード・参加パスワードは DB 上で暗号化、Web 上でのみ表示/再生成。
+### 新規マップについて
+`sim` にはサーバ起動時に新規マップを自動生成するオプションが乏しい。そのため、**運営があらかじめ作っておいた空マップのテンプレートセーブ**（pak × サイズごと）から選ぶ方式にする。
 
 ---
 
-## 7. Web ポータル機能（MVP → 拡張）
+## 8. pakset 管理
 
-**MVP**
-- Discord ログイン（日本の Simutrans コミュニティは Discord 中心のため）
-- サーバ作成: 名前 / OTRP バージョン / pakset / 新規マップ or セーブアップロード
-- 起動・停止・接続先表示（`host:port` コピー、必要クライアント版・pak の案内リンク）
-- セーブ一覧・ダウンロード・ロールバック（任意のセーブから再開）
-- 管理者機能（nettool 相当）: 接続中クライアント一覧、kick/ban、say、会社ロック解除
-
-**拡張**
-- 共同管理者招待（`server_members`）
-- 定期バックアップ世代管理、休止からの自動復帰通知
-- Discord Webhook（起動・停止・異常の通知）
-- 公開サーバ一覧ページ（このサービス内のディレクトリ）
-- 運営画面: ノード状況、強制停止、ユーザー BAN
-
-> 新規マップ作成: Simutrans はサーバ起動時に新規マップを生成する CLI オプションが乏しいため、
-> MVP では「運営が用意したテンプレートセーブ（空マップ各サイズ）」から選ぶ方式にする。
-> 将来、マップ生成用の CLI オプション追加（本リポジトリ側の改修）を検討。
+- **初期搭載**: このリポジトリの `get_pak.sh` は引数で番号を指定すれば対話なしで実行できるので、サーバ構築時にそれで取得する。対象は pak64 / pak128 / pak128.japan / pak64.japan 等、標準インストーラに載っているもの。
+- **追加**: 運営が `/admin pak add url:` で URL を渡す → Bot がダウンロード・展開・sha256 を記録 → `paksets` に登録。
+- **クライアント側の注意**: サーバと同じ版の pak でないと接続時に弾かれる。`/server info` で「この pak のこの版」と取得元 URL を必ず案内する。
+- ユーザーによる pak・アドオンの持ち込みは当面不可（セキュリティと容量の問題）。
 
 ---
 
-## 8. 運用・コスト見積り（ざっくり）
+## 9. OTRP バージョン方針（最新版のみ）
 
-| 規模 | 構成 | 月額目安 |
+```
+新しい OTRP タグが打たれる
+   ↓ CI がサーバ用イメージをビルド（amd64/arm64）
+   ↓ 運営が /admin version add で登録 → current に昇格、旧 current は previous へ
+   ↓ Discord に告知（「v51 になりました。クライアントを更新してください」）
+新規サーバ: current で作成
+既存サーバ: 次回起動時に current へ自動移行
+            （新しい版は古いセーブを読めるのが基本。読めなかった場合は previous で起動し、owner に通知）
+移行期間（例 2週間）の経過後: previous を retired にしてイメージを削除
+```
+
+- 常に存在するのは **最新 + 1つ前** の最大2つだけ → 管理がシンプル。
+- `OTRP_VERSION_MAJOR` が上がると、**古い版では新しいセーブを読めない**（一方通行）。自動移行の前に必ず停止時セーブを取っておく。
+
+---
+
+## 10. 言語・技術スタック
+
+| 用途 | 採用 | 理由 |
 |---|---|---|
-| 検証 | Oracle Free ARM 1台（全部入り）+ R2 無料枠 | ¥0 |
-| 小規模（同時稼働 〜10 サーバ） | 国内 VPS 8GB ×1（全部入り）+ R2 | ¥4,000〜6,000 |
-| 中規模（同時稼働 〜40 サーバ） | 制御用 VPS 1GB + ゲーム用 8GB ×4 + R2 | ¥15,000〜25,000 |
+| Bot 本体 | **Python 3.12 + discord.py** | Discord Bot の情報量が最も多い。読みやすく、インフラ系の人でも追いやすい |
+| Docker 操作 | `docker`（Python SDK） | 公式 SDK |
+| DB | SQLite（標準ライブラリ） | 追加の構築が不要 |
+| バックアップ | `boto3`（S3 互換） | Oracle/R2 どちらでも同じコードで使える |
+| 実行環境 | Bot 自体も Docker コンテナ、`docker compose` で起動 | 構築手順が `compose up` だけになる |
+| サーバ構築 | シェルスクリプト or Ansible | 慣れている方でよい |
+| 監視 | Bot 自身が異常を Discord の運営チャンネルへ投稿 + Uptime Kuma（任意） | 追加コストなし |
 
-※ 休止機能により「登録サーバ数」は同時稼働数の数倍を収容できる想定。
-※ 費用負担の方法（寄付 / 支援者プラン / 完全無料で枠制限）は別途決定が必要。
-
-**バックアップ**: DB は日次 `pg_dump` を R2 へ（7〜30世代）。セーブは R2 のライフサイクルで世代削除。
-**監視**: ノード heartbeat 途絶・コンテナ異常終了・ディスク残量を Discord Webhook に通知。
-
----
-
-## 9. リポジトリ構成案
-
-| 置き場所 | 内容 |
-|---|---|
-| **本リポジトリ（TID_simutrans）** | サーバ用 `Dockerfile`（posix ビルド）、GitHub Actions でイメージを GHCR に push（amd64/arm64） |
-| **新規リポジトリ（例: `simutrans-hosting`）** | API、node-agent、Web ポータル、DB マイグレーション、IaC（Ansible / Terraform）、docker-compose（開発用） |
-
-ゲーム本体とサービス側はリリースサイクルが異なるため分離を推奨。
+> Go などに比べて実行速度は劣るが、Bot がしているのは「コマンドを受けて Docker に指示する」程度なので、問題にならない。
 
 ---
 
-## 10. 実装ロードマップ
+## 11. リポジトリ構成
+
+### 分けるメリット・デメリット
+
+| | 分ける（推奨） | このリポジトリに同居 |
+|---|---|---|
+| ゲーム本体の PR・CI | 影響なし | Bot の変更でも Windows/Mac/Ubuntu のビルド CI が走る |
+| 上流（OTRP 本家）との同期 | 衝突しない | サービス用ファイルが混ざり、取り込みや PR が汚れる |
+| リリースの単位 | 別々に出せる（Bot だけ直す、など） | ゲームのタグと混ざる |
+| 権限・秘密情報 | サービス側だけ非公開にもできる | ゲームと同じ公開範囲になる |
+| 管理の手間 | リポジトリが2つになる | 1つで済む |
+| バージョン連携 | 「どの OTRP タグを使うか」を指定する仕組みが必要 | 同じリポジトリ内で完結 |
+
+**推奨: 分ける。**
+
+- **TID_simutrans（このリポジトリ）**: 変更しない（または最小限）。
+- **新リポジトリ（例: `simutrans-hosting`）**:
+  - `image/Dockerfile` … TID_simutrans の指定タグを取得してサーバ用にビルド
+  - `bot/` … Discord Bot
+  - `deploy/` … `compose.yaml`、サーバ構築スクリプト、手順書
+  - `docs/` … この設計書（新リポジトリ作成時に移す）
+- 新しい OTRP タグを検知する仕組み: 新リポジトリの GitHub Actions で定期的にタグを確認する（または手動実行）。
+
+---
+
+## 12. ロードマップ
 
 | フェーズ | 内容 | 完了条件 |
 |---|---|---|
-| **P0: サーバイメージ化** | 本リポジトリに Dockerfile と CI を追加。pakset 取得スクリプト。手動 `docker run` で接続できる | クライアントから接続して遊べる |
-| **P1: MVP（単一ノード）** | DB マイグレーション、API（認証・サーバ CRUD・起動停止）、agent（コンテナ制御・セーブ退避）、最小 UI | 他人がログインして自分のサーバを立てられる |
-| **P2: 運用機能** | 休止/復帰、バックアップ、nettool Web コンソール、プラン制限、監視通知 | 放置しても資源を食わず、データが消えない |
-| **P3: スケール** | 複数ノード・スケジューラ、ノードの draining/移設、サーバ固有 DNS、公開一覧 | ノード追加だけで収容数を増やせる |
-| **P4: 発展** | 寄付ノード参加、ユーザー pak（サンドボックス）、マップ生成 CLI | — |
+| **P0: 手動で動かす** | Oracle VM 作成、サーバ用イメージ作成、pak 取得、`docker run` で 1サーバを起動 | クライアントから接続して遊べる |
+| **P1: Bot 最小版** | create / start / stop / info / delete、SQLite、権限 | 他の人が Discord だけで自分のサーバを立てられる |
+| **P2: 運用機能** | 無人時の自動停止、セーブ一覧・ロールバック、日次バックアップ、kick/ban/say、上限チェック | 放置しても資源を食わず、データが消えない |
+| **P3: 改善** | 大きいセーブのアップロード URL、バージョン自動移行、運営コマンド、公開リスト掲載 | 運営の手作業がほぼ無い |
+| 将来 | 複数台・PostgreSQL・Web 画面 | 必要になったら |
 
 ---
 
-## 11. 決めてほしいこと（オープン事項）
+## 13. 残っている決定事項
 
-1. **予算と費用負担**: 完全無料運営か、寄付・支援者プランを設けるか → クラウド選定とプラン設計が決まる
-2. **初期クラウド**: Oracle Free で始めるか、最初から国内 VPS か
-3. **想定利用者**: 日本のコミュニティ中心か、海外も含むか（リージョン・UI 言語）
-4. **対応 pakset**: 最初に載せる pak（pak128.japan / pak64 / pak128 等）と配布ライセンスの確認
-5. **認証**: Discord のみでよいか（X/Twitter, GitHub 等も必要か）
-6. **バージョン方針**: 最新 OTRP のみか、旧バージョンも並行提供するか
-7. **言語スタック**: Go（API/agent）+ SvelteKit/Next.js の案でよいか
-8. **リポジトリ**: サービス本体を新規リポジトリに分けてよいか
+1. **Discord Bot 方式で確定してよいか**（認証もこれで決まる）
+2. **Oracle Always Free で始めてよいか**（クレジットカード登録が許容できるか。ダメなら月 ¥1,000 前後の VPS）
+3. **言語は Python でよいか**
+4. **新しいリポジトリを作ってよいか**、名前は何にするか
+5. 利用範囲: 専用 Discord ギルド内に限定するか、誰でも Bot を招待できるようにするか
+6. 制限値（§5）の初期案はこれでよいか
+7. 初期搭載する pak の絞り込み（容量節約のため全部は入れない、など）
