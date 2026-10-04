@@ -1,4 +1,4 @@
-# Simutrans OTRP サーバ間借りサービス 設計書（ドラフト v0.4）
+# Simutrans OTRP サーバ間借りサービス 設計書（ドラフト v0.5）
 
 > 目的: 「自分ではサーバを立てられない人」が、Discord から数コマンドで
 > Simutrans OTRP のマルチプレイサーバを立て、仲間と遊べるようにする。
@@ -6,7 +6,7 @@
 > 副目的: 運営者（オンプレ保守経験のみ）が、**クラウド構築・IaC（Terraform / Ansible）・AI を使った運用**を
 > 実践を通して身につける。
 
-## 0. 決定事項・方針（v0.4）
+## 0. 決定事項・方針（v0.5）
 
 | 項目 | 決定 / 方針 | 状態 |
 |---|---|---|
@@ -330,6 +330,7 @@ CREATE TABLE events (
 | 中身の設定（OS・Docker・Bot 配置） | **Ansible** | §12 |
 | CI/CD | GitHub Actions | plan / lint / 反映を自動化（§13） |
 | 監視 | Bot 自身が異常を Discord の運営チャンネルへ投稿 + Uptime Kuma（任意） | 追加コストなし |
+| 可視化（任意・O1） | Prometheus + Grafana（または Grafana Cloud 無料枠） | 運用開始後にデータを見て判断するため（§15.2） |
 
 > Go などに比べて実行速度は劣るが、Bot がしているのは「コマンドを受けて Docker に指示する」程度なので、問題にならない。
 
@@ -421,7 +422,8 @@ simutrans-hosting/
 │       ├── docker/              # Docker Engine と compose
 │       ├── simu_host/           # /srv/simu 配下、get_pak.sh で pak 取得、テンプレートセーブ
 │       ├── bot/                 # compose.yaml と .env を配置して起動
-│       └── backup/              # rclone で R2 へ日次バックアップ
+│       ├── backup/              # rclone で R2 へ日次バックアップ
+│       └── monitoring/          # （任意・O1）node_exporter / cAdvisor / Prometheus / Grafana
 └── .github/workflows/           # §13
 ```
 
@@ -510,6 +512,8 @@ VPS 版で運用経験を積んだ後、段階的に移行する。
 
 ## 15. ロードマップ（学習を兼ねる）
 
+### 15.1 本線（必須）
+
 | 段階 | 内容 | 身につくこと | 完了条件 |
 |---|---|---|---|
 | **S1 準備** | GitHub 新リポジトリ、クラウド・Cloudflare アカウント、MFA、予算アラート。手元に Terraform / Ansible を導入（Windows なら WSL） | アカウント管理の基本 | 各サービスに安全にログインできる |
@@ -518,13 +522,44 @@ VPS 版で運用経験を積んだ後、段階的に移行する。
 | **S4 中身を作る** | Ansible `base` / `docker` ロール | **Ansible の基本**、冪等性 | 2回目の実行で `changed=0` |
 | **S5 手動で遊ぶ** | Docker で Simutrans サーバを**手で**起動し、手元クライアントから接続 → 手順を `simu_host` ロールに落とし込む | Docker、「手作業 → コード化」の流れ | Ansible だけでゲームサーバが立つ |
 | **S6 Bot 最小版** | create / start / stop / info / delete（コードは Claude Code が作成、人がレビュー） | PR レビュー、Python を読む力 | 他の人が Discord だけでサーバを立てられる |
-| **S7 運用機能** | 無人時の自動停止、セーブ一覧・ロールバック、R2 バックアップ（`backup` ロール）、kick/ban/say、上限チェック、異常通知 | 運用設計 | 放置しても資源を食わず、データが消えない |
+| **S7 運用機能** | 無人時の自動停止、セーブ一覧・ロールバック、R2 バックアップ（`backup` ロール）、kick/ban/say、上限チェック、異常通知（Discord + GitHub Issue 自動作成）、Uptime Kuma | 運用設計 | 放置しても資源を食わず、データが消えない |
 | **S8 CI 化** | PR で plan / lint、マージ後の反映（承認付き）、毎日のドリフト検出、Discord 通知 | **GitOps**、GitHub Actions | 手元から apply しなくなる |
 | **S9 復旧訓練** | staging 環境を Terraform + Ansible で**ゼロから作り、バックアップから復元**→ 所要時間を記録 → destroy | 障害復旧（DR）、IaC の真価 | 手順書なしで○分以内に復旧できる |
 | ── **一般公開・運用開始** ── | | | |
 | **S10 AWS 移行** | ① AWS の安全設定 → ② バックアップ先を S3 へ → ③ AI レポートを Bedrock へ → ④ 管理部分を Lambda + DynamoDB へ → ⑤ ゲームを Fargate へ（すべて Terraform） | AWS、IAM、サーバレス | VPS を解約しても動く |
 
 各段階は「元に戻せる状態」を保ったまま進める。S9 の復旧訓練は、本番公開前に必ず一度行う。
+
+### 15.2 任意の追加（オプション）
+
+本線とは独立していて、**やらなくてもサービスは動く**。前提条件を満たした後なら、好きな時期に差し込める。
+
+| 段階 | 内容 | 前提 | おすすめ時期 | 身につくこと | 完了条件 |
+|---|---|---|---|---|---|
+| **O1 可視化** | Ansible `monitoring` ロール（node_exporter / cAdvisor / Prometheus / Grafana / Alertmanager → Discord）。Bot に `/metrics`（稼働サーバ数・サーバ別の接続人数・起動時間・停止理由）を追加 | S7、S8（GitOps で入れるため） | **運用開始から2〜4週間後**（データが溜まり始めてから意味が出る） | Prometheus / PromQL / Grafana、メトリクス設計 | ダッシュボードで「サーバ別のメモリ・CPU・人数」の推移が見られる |
+| **O2 AI 週次レポート** | Bot 内の LLM API で、1週間の稼働・エラー・費用・（O1 があれば）グラフの数値を要約し運営チャンネルへ | S7 | O1 の後だと内容が具体的になる | LLM API の使い方、AI に渡すデータの設計 | 毎週月曜にレポートが届く |
+| **O3 Dots 秘書** | GitHub 読み取りのみで、週次まとめ・レビュー待ちの催促・料金/規約変更の見張り | S8 | 予算に余裕が出たら | 新しい AI エージェントの評価 | 本番権限を渡さずに役に立っている |
+
+**O1 の構成の選び方**
+
+| VM のメモリ | 構成 | 理由 |
+|---|---|---|
+| 8GB 以上（Oracle Free など） | Prometheus と Grafana も VM 上で動かす | 一式で数百MB。余裕がある |
+| 2〜4GB | **Grafana Cloud の無料枠**を使い、VM には送信用エージェント（Grafana Alloy）だけ置く | ゲームサーバにメモリを残す。無料枠の範囲は要確認 |
+| AWS 移行後 | CloudWatch に置き換え（Prometheus 互換のマネージドサービスもあるが有料） | — |
+
+**O1 で判断できるようになること**: 同時稼働上限（§5）の見直し、混雑する時間帯、起動時間の悪化、メモリ上限の妥当性。O1 の数値は S10（AWS 移行）での Fargate のサイズ決めにもそのまま使える。
+
+### 15.3 全体の流れ
+
+```
+S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → [公開] → S10
+                                    │     │            ▲
+                                    │     └─ O3（任意） │
+                                    └──────── O2（任意）│
+                                          O1（任意。公開後2〜4週間が目安）─┘
+                                          └→ O2 の内容が充実 / S10 のサイズ決めに使える
+```
 
 ---
 
@@ -558,6 +593,7 @@ VPS 版で運用経験を積んだ後、段階的に移行する。
 | rclone | R2 へのバックアップ | VM |
 | GitHub Actions | lint / plan / 反映 / 通知 | GitHub |
 | Uptime Kuma | 外部からの死活監視 | 任意 |
+| Prometheus / Grafana | 数値の収集・グラフ化・アラート（O1） | 任意（VM 上 or Grafana Cloud） |
 | WSL | Windows で Terraform / Ansible を動かす | 手元（Windows の場合） |
 
 ### 16.3 AI の担当
