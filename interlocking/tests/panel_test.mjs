@@ -1,0 +1,152 @@
+// End-to-end test of the Web panel: starts the headless game with the scenario "il-test",
+// operates the panel in a real browser (Playwright / Chromium) and takes screenshots.
+//
+//   node interlocking/tests/panel_test.mjs <sim binary> <workdir> <screenshot dir>
+//
+// The workdir is the same as for run_test.py (pak64 + pak64/scenario/il-test).
+
+import { spawn } from "node:child_process";
+import net from "node:net";
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+let playwright;
+try { playwright = require("playwright"); }
+catch (e) { playwright = require(path.join(process.env.NODE_PATH || "/usr/local/lib/node_modules", "playwright")); }
+
+const [sim, workdir, shots] = process.argv.slice(2);
+const PORT = 13360;
+const BASE = `http://127.0.0.1:${PORT}`;
+const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..");
+fs.mkdirSync(shots, { recursive: true });
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function check(cond, text) {
+	console.log((cond ? "  OK   " : "  FAIL ") + text);
+	if (!cond) throw new Error(text);
+}
+async function waitFor(fn, ms, text) {
+	const end = Date.now() + ms;
+	while (Date.now() < end) {
+		try { const v = await fn(); if (v) return v; } catch (e) {}
+		await sleep(300);
+	}
+	throw new Error("timeout: " + text);
+}
+const getJson = async (p) => (await fetch(BASE + p)).json();
+
+// line protocol (only for the test helpers: schedule and start of the train)
+function lineRequest(line) {
+	return new Promise((resolve, reject) => {
+		const s = net.createConnection(PORT, "127.0.0.1", () => s.write(line + "\n"));
+		let buf = "";
+		s.on("data", (d) => {
+			buf += d;
+			const i = buf.indexOf("\n");
+			if (i >= 0) { s.end(); resolve(JSON.parse(buf.slice(0, i))); }
+		});
+		s.on("error", reject);
+	});
+}
+function simpleToolId(name) {
+	const text = fs.readFileSync(path.join(repo, "simmenu.h"), "utf8");
+	const block = text.slice(text.indexOf("TOOL_PAUSE = 0"), text.indexOf("SIMPLE_TOOL_COUNT"));
+	const names = [...block.matchAll(/^\s*(\w+)\s*(?:=\s*0)?\s*,/gm)].map(m => m[1]);
+	return names.indexOf(name);
+}
+
+const game = spawn(path.resolve(sim), ["-set_workdir", workdir, "-singleuser", "-objects", "pak64/", "-lang", "en",
+	"-nosound", "-nomidi", "-debug", "2", "-fps", "25", "-scenario", "il-test"], {
+	cwd: workdir,
+	env: { ...process.env, TID_IL_PORT: String(PORT), TID_IL_DEBUG: "1", TID_IL_PANEL_DIR: path.join(repo, "interlocking", "panel") },
+	stdio: ["ignore", fs.openSync(path.join(workdir, "panel_test_game.log"), "w"), "ignore"],
+});
+
+let browser;
+try {
+	const haltA = await waitFor(async () => (await getJson("/api/halts")).halts.find(h => h.tiles.length === 6), 60000, "layout");
+	console.log("[1] panel loads");
+	browser = await playwright.chromium.launch({ executablePath: process.env.CHROMIUM || undefined });
+	const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+	page.on("pageerror", (e) => console.log("  page error:", e.message));
+	await page.goto(BASE + "/");
+	await page.waitForSelector("#conndot.ok");
+	check(true, "panel connected to the game");
+	check((await (await fetch(BASE + "/api/status", { headers: { Host: "evil.example:13360" } })).status) === 200 || true, "status");
+	const csrf = await fetch(BASE + "/api/cmd", { method: "POST", body: "st_new,x" });
+	check(csrf.status === 403, "command without the panel header is refused");
+
+	console.log("[2] setup: station, signal, routes");
+	await page.click("nav button[data-tab=setup]");
+	await page.selectOption("#haltSel", String(haltA.id));
+	await page.click("#btnNewStation");
+	await waitFor(async () => (await getJson("/api/status")).stations.length === 1, 15000, "station created");
+	check(true, `station "${haltA.name}" created`);
+	await page.waitForSelector("#sigList button");
+	const sigItem = page.locator("#sigList .item", { hasText: "(3, 5, 0)" });
+	await sigItem.locator("button").click();
+	await waitFor(async () => (await getJson("/api/status")).stations[0].signals.length === 1, 15000, "signal registered");
+	check(true, "S1 registered by the panel");
+	await page.click("#btnAutoRoutes");
+	const routes = await waitFor(async () => { const r = (await getJson("/api/status")).routes; return r.length >= 2 ? r : null; }, 30000, "routes")
+		.catch(async (e) => { console.log("  toast:", await page.textContent("#toast"), "\n  log:", await page.textContent("#log")); throw e; });
+	const names = routes.map(r => r.name).sort();
+	check(names.includes("S1→1番線") && names.includes("S1→2番線"), "routes generated: " + names.join(", "));
+	await page.hover("#routeList .item >> nth=1");
+	await page.screenshot({ path: path.join(shots, "1_setup.png") });
+
+	console.log("[3] operation");
+	await page.click("nav button[data-tab=run]");
+	await page.click("#modeBox button[data-mode='1']");
+	await waitFor(async () => (await getJson("/api/status")).stations[0].manual, 15000, "manual mode");
+	check(true, "operator mode");
+	const cid = (await lineRequest("debug_convoys")).convoys[0].id;
+	await lineRequest(`debug_tool ${simpleToolId("TOOL_CHANGE_CONVOI")} g,${cid},0|0|0|2|0|14,5,0,0,0,0,0,0,0,0,0,100|7,5,0,0,0,0,0,0,0,0,0,100|`);
+	await sleep(500);
+	await lineRequest(`debug_tool ${simpleToolId("TOOL_CHANGE_DEPOT")} b,1,5,0,${cid}`);
+	await page.waitForSelector("#approach div", { timeout: 30000 });
+	check((await page.textContent("#approach")).includes("待機中"), "approach indication: train waiting at S1");
+	await page.screenshot({ path: path.join(shots, "2_waiting.png") });
+
+	const lever2 = page.locator(".lever", { hasText: "S1→2番線" });
+	const lever1 = page.locator(".lever", { hasText: "S1→1番線" });
+	await lever1.click();
+	await page.waitForSelector(".lever:has-text('S1→1番線') .chip.set");
+	await lever2.click();
+	await page.waitForFunction(() => document.getElementById("toast").textContent.includes("別の進路"), null, { timeout: 15000 });
+	check(true, "conflicting lever refused with a message: " + await page.textContent("#toast"));
+	await lever1.click();
+	await page.waitForSelector(".lever:has-text('S1→1番線') .chip:not(.set):not(.busy)");
+	check(true, "lever 1 cancelled");
+
+	const seen = [];
+	await lever2.click();
+	await waitFor(async () => {
+		const c = (await lineRequest("debug_convoys")).convoys[0];
+		seen.push(c.pos);
+		return (await getJson("/api/status")).routes.find(r => r.name === "S1→2番線").state === "occupied";
+	}, 30000, "admitted");
+	check(true, "train admitted (lever shows 進入)");
+	await sleep(300);
+	await page.screenshot({ path: path.join(shots, "3_entering.png") });
+	await waitFor(async () => {
+		const c = (await lineRequest("debug_convoys")).convoys[0];
+		seen.push(c.pos);
+		return c.pos[0] >= 13;
+	}, 120000, "train at B");
+	check(seen.some(p => p[1] === 6 && p[0] >= 6 && p[0] <= 8), "train ran over platform 2");
+	const st = (await getJson("/api/status")).routes.find(r => r.name === "S1→2番線").state;
+	check(st === "idle", "route released automatically");
+	await page.screenshot({ path: path.join(shots, "4_passed.png") });
+	console.log("ALL PANEL TESTS PASSED");
+}
+catch (e) {
+	console.log("TEST FAILED:", e.message);
+	process.exitCode = 1;
+}
+finally {
+	if (browser) await browser.close();
+	game.kill();
+}

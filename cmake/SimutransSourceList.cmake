@@ -299,6 +299,7 @@ target_sources(simutrans PRIVATE
 		interlocking/il_bridge.cc # TID_IL H7
 		interlocking/il_hooks.cc # TID_IL H7
 		interlocking/il_manager.cc # TID_IL H7
+		interlocking/il_query.cc # TID_IL H7
 		interlocking/il_tool.cc # TID_IL H7
 		squirrel/sq_extensions.cc
 		squirrel/sqstdlib/sqstdaux.cc

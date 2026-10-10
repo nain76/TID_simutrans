@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TID 連動盤</title>
+<style>
+:root {
+	--bg: #14181f;
+	--panel: #1c222c;
+	--panel2: #232b37;
+	--line: #323c4b;
+	--text: #e6e9ee;
+	--muted: #8b95a5;
+	--track: #8a94a3;
+	--platform: #2a3a52;
+	--locked: #f2c94c;
+	--occupied: #ff5a5f;
+	--green: #3fd17a;
+	--red: #ff5a5f;
+	--yellow: #f2c94c;
+	--accent: #5aa9ff;
+	--preview: #4fd1e8;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+	background: var(--bg); color: var(--text);
+	font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;
+	display: flex; flex-direction: column;
+}
+header {
+	display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+	padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+}
+header h1 { font-size: 16px; margin: 0 8px 0 0; letter-spacing: .05em; }
+.conn { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
+.dot.ok { background: var(--green); }
+select, input, button {
+	font: inherit; color: var(--text); background: var(--panel2);
+	border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px;
+}
+input[type=number] { width: 70px; }
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: #1f4f86; border-color: #2c6cb5; }
+button.danger { background: #5a1f24; border-color: #8a2d34; }
+button:disabled { opacity: .45; cursor: default; }
+.mode { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.mode button { border: 0; border-radius: 0; background: transparent; padding: 5px 14px; }
+.mode button.on { background: #1f4f86; }
+.mode button.on.manual { background: #8a5a12; }
+nav { display: flex; gap: 4px; margin-left: auto; }
+nav button { background: transparent; border-color: transparent; }
+nav button.on { background: var(--panel2); border-color: var(--line); }
+main { flex: 1; display: flex; min-height: 0; }
+#mapwrap { flex: 1; overflow: auto; position: relative; background: #0f1319; }
+#map { display: block; }
+aside {
+	width: 360px; max-width: 45vw; background: var(--panel); border-left: 1px solid var(--line);
+	overflow: auto; padding: 14px 16px;
+}
+aside h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 18px 0 8px; letter-spacing: .05em; }
+aside h2:first-child { margin-top: 0; }
+.levers { display: flex; flex-direction: column; gap: 6px; }
+.lever {
+	display: flex; align-items: center; justify-content: space-between; gap: 8px;
+	padding: 8px 10px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--line);
+	text-align: left; width: 100%;
+}
+.lever .name { font-weight: 600; }
+.lever .sub { color: var(--muted); font-size: 12px; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #2f3846; color: var(--muted); white-space: nowrap; }
+.chip.set { background: #4d3d10; color: var(--locked); }
+.chip.occupied { background: #4f1c20; color: var(--occupied); }
+.chip.busy { background: #12324f; color: var(--accent); }
+.group { margin-bottom: 10px; }
+.group-title { font-size: 12px; color: var(--muted); margin: 6px 0 4px; }
+.approach { display: flex; flex-direction: column; gap: 6px; }
+.approach div { padding: 6px 10px; border-radius: 8px; background: #3a2a0e; color: var(--yellow); animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { opacity: .55; } }
+.hint { color: var(--muted); font-size: 12px; }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.list { display: flex; flex-direction: column; gap: 4px; }
+.list .item { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 5px 8px; background: var(--panel2); border-radius: 6px; }
+#log { font: 12px/1.6 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+#log .err { color: var(--red); }
+#log .ok { color: var(--green); }
+#toast {
+	position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+	background: #3d1519; border: 1px solid #8a2d34; color: #ffd7d9; padding: 10px 16px; border-radius: 8px;
+	display: none; max-width: 90vw; z-index: 10;
+}
+#toast.info { background: #12324f; border-color: #2c6cb5; color: #d7e9ff; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend span::before { content: ""; display: inline-block; width: 16px; height: 4px; margin-right: 5px; vertical-align: middle; border-radius: 2px; background: var(--c); }
+.empty { color: var(--muted); padding: 30px; text-align: center; }
+svg text { font-family: inherit; }
+.clickable { cursor: pointer; }
+@media (max-width: 760px) {
+	main { flex-direction: column; }
+	aside { width: 100%; max-width: none; border-left: 0; border-top: 1px solid var(--line); }
+	#mapwrap { min-height: 50vh; }
+}
+</style>
+</head>
+<body>
+<header>
+	<h1>TID 連動盤</h1>
+	<span class="conn"><span class="dot" id="conndot"></span><span id="conntext">接続中…</span></span>
+	<select id="stationSel" title="連動駅"></select>
+	<div class="mode" id="modeBox">
+		<button data-mode="0">自動</button>
+		<button data-mode="1" class="manual">扱者</button>
+	</div>
+	<nav>
+		<button data-tab="run" class="on">運転</button>
+		<button data-tab="setup">設定</button>
+		<button data-tab="log">ログ</button>
+	</nav>
+</header>
+<main>
+	<div id="mapwrap"><svg id="map"></svg><div class="empty" id="mapEmpty">連動駅がありません。「設定」タブで駅を作成してください。</div></div>
+	<aside>
+		<section id="tab-run">
+			<h2>接近表示</h2>
+			<div class="approach" id="approach"><span class="hint">待っている列車はありません</span></div>
+			<h2>進路てこ</h2>
+			<div id="levers" class="levers"></div>
+			<p class="hint" id="runHint"></p>
+			<div class="legend">
+				<span style="--c: var(--track)">線路</span>
+				<span style="--c: var(--locked)">進路鎖錠</span>
+				<span style="--c: var(--occupied)">在線・予約</span>
+				<span style="--c: var(--preview)">進路の表示</span>
+			</div>
+		</section>
+		<section id="tab-setup" hidden>
+			<h2>1. 連動駅を作る</h2>
+			<div class="row">
+				<select id="haltSel" style="flex:1"></select>
+				<button class="primary" id="btnNewStation">作成</button>
+			</div>
+			<p class="hint">鉄道のホームがある駅だけが一覧に出ます。作成すると、その駅の周りが表示されます。</p>
+
+			<h2>2. 表示する範囲</h2>
+			<div class="row">
+				x <input type="number" id="ax1"> 〜 <input type="number" id="ax2">
+			</div>
+			<div class="row">
+				y <input type="number" id="ay1"> 〜 <input type="number" id="ay2">
+			</div>
+			<div class="row">
+				<button id="btnArea">範囲を適用</button>
+				<button id="btnAreaFit">駅に合わせる</button>
+			</div>
+
+			<h2>3. てこ扱い信号</h2>
+			<p class="hint">地図上の信号をクリックすると、てこ扱い（連動盤で扱う信号）の登録・解除ができます。場内信号・出発信号を登録してください。</p>
+			<div class="list" id="sigList"></div>
+
+			<h2>4. 進路</h2>
+			<div class="row">
+				<button class="primary" id="btnAutoRoutes">進路を自動作成</button>
+				<button id="btnManualRoute">手で作る</button>
+			</div>
+			<p class="hint" id="routeHint">自動作成: 各てこ扱い信号から各番線へ、各番線の出発信号から区域の出口への進路を作ります。手で作る: 始点の信号 → 着点の線路の順にクリックします。</p>
+			<div class="list" id="routeList"></div>
+
+			<h2>駅の削除</h2>
+			<button class="danger" id="btnDelStation">この連動駅を削除</button>
+		</section>
+		<section id="tab-log" hidden>
+			<h2>ログ</h2>
+			<div id="log"></div>
+		</section>
+	</aside>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// constants
+// ---------------------------------------------------------------------------
+const N = 1, E = 2, S = 4, W = 8;
+const DIRS = [N, E, S, W];
+const DXY = { [N]: [0, -1], [E]: [1, 0], [S]: [0, 1], [W]: [-1, 0] };
+const BACK = { [N]: S, [E]: W, [S]: N, [W]: E };
+let CELL = 34;               // size of one tile in pixels (fitted to the window)
+
+const ERRORS = {
+	"another route from this signal is set": "この信号から別の進路が設定されています",
+	"conflicting route is set": "敵対進路が設定されています",
+	"track is occupied": "進路上に列車がいます（在線）",
+	"station is in automatic mode": "自動モードでは進路を扱えません。「扱者」に切り替えてください",
+	"route is not idle": "この進路はすでに設定されています",
+	"train already admitted": "列車が進入済みのため取り消せません",
+	"route is not set": "進路は設定されていません",
+	"not owner": "この駅を操作する権限がありません",
+	"no track from the start signal to the end tile": "信号から着点まで線路がつながっていません（信号の向きを確認）",
+	"start is not a registered signal of this station": "始点がてこ扱い信号として登録されていません",
+	"no rail signal at this position": "その位置に信号がありません",
+	"signal belongs to another station": "別の連動駅の信号です",
+	"signal already registered": "すでに登録されています",
+	"signal not registered": "登録されていません",
+	"route is occupied": "進入中の進路は削除できません",
+	"track of the route is missing": "進路の線路がなくなっています",
+	"start signal is missing": "始点の信号がなくなっています",
+	"start and end are the same tile": "始点と着点が同じです",
+	"unknown station": "連動駅が見つかりません",
+	"unknown route": "進路が見つかりません",
+};
+const tr = (e) => ERRORS[e] || e;
+
+// ---------------------------------------------------------------------------
+// state
+// ---------------------------------------------------------------------------
+let status = { stations: [], routes: [] };
+let tracks = { tiles: [], convoys: {} };
+let halts = [];
+let info = { map: [0, 0] };
+let lastEvent = 0;
+let connected = false;
+let stationId = Number(localStore("station") || 0);
+let tab = "run";
+let pending = new Map();          // command text -> label (waiting for result)
+let hoverRoute = null;
+let selectedSignal = null;        // key of a signal (run tab)
+let manualRoute = null;           // {start:[x,y,z]} while creating a route by clicking
+let tileIndex = new Map();        // "x,y,z" -> tile
+let xyIndex = new Map();          // "x,y" -> [tiles]
+
+function localStore(k, v) {
+	try {
+		if (v === undefined) return localStorage.getItem("tidil." + k);
+		localStorage.setItem("tidil." + k, v);
+	} catch (e) { return null; }
+}
+function areaOf(id) {
+	try { return JSON.parse(localStore("area." + id) || "null"); } catch (e) { return null; }
+}
+function setArea(id, a) { localStore("area." + id, JSON.stringify(a)); }
+const key = (p) => p.join(",");
+const station = () => status.stations.find(s => s.id === stationId);
+
+// ---------------------------------------------------------------------------
+// communication
+// ---------------------------------------------------------------------------
+async function api(path) {
+	const r = await fetch(path, { cache: "no-store" });
+	if (!r.ok) throw new Error(path + " " + r.status);
+	return r.json();
+}
+async function command(cmd, label) {
+	pending.set(cmd, label || cmd);
+	render();
+	try {
+		const r = await fetch("/api/cmd", { method: "POST", headers: { "X-IL-Panel": "1", "Content-Type": "text/plain; charset=utf-8" }, body: cmd });
+		if (!r.ok) throw new Error("HTTP " + r.status);
+	} catch (e) {
+		pending.delete(cmd);
+		toast("送信できませんでした: " + e.message);
+	}
+	// the result arrives as an event; give up waiting after a while
+	setTimeout(() => { if (pending.delete(cmd)) render(); }, 15000);
+}
+// sends a command and waits for its result event
+function commandResult(cmd) {
+	return new Promise((resolve) => {
+		waiters.push({ cmd, resolve });
+		command(cmd);
+		setTimeout(() => resolve({ ok: false, error: "timeout" }), 15000);
+	});
+}
+let waiters = [];
+
+async function pollEvents() {
+	const r = await api("/api/events?since=" + lastEvent);
+	if (r.last < lastEvent) lastEvent = 0; // game restarted
+	for (const ev of r.events) handleEvent(ev);
+	lastEvent = r.last;
+}
+function handleEvent(ev) {
+	if (ev.type === "result") {
+		const label = pending.get(ev.command) || ev.command;
+		pending.delete(ev.command);
+		waiters = waiters.filter(w => { if (w.cmd === ev.command) { w.resolve(ev); return false; } return true; });
+		log((ev.ok ? "OK  " : "NG  ") + label + (ev.ok ? "" : " … " + tr(ev.error)), ev.ok ? "ok" : "err");
+		if (!ev.ok && !ev.command.startsWith("rt_def")) toast(tr(ev.error));
+	}
+	else if (ev.type === "route") {
+		const r = status.routes.find(x => x.id === ev.id);
+		const name = r ? r.name : "#" + ev.id;
+		const st = { idle: "定位（解除）", set: "設定", occupied: "進入" + (ev.convoy ? "：" + ev.convoy : "") }[ev.state];
+		log(`進路 ${name} → ${st}`);
+	}
+	else if (ev.type === "wrong_route") {
+		const r = status.routes.find(x => x.id === ev.id);
+		toast(`誤進路: ${ev.convoy} は「${r ? r.name : ev.id}」の先から目的地へ行けません`);
+		log(`誤進路: ${ev.convoy} / ${r ? r.name : ev.id}`, "err");
+	}
+	else if (ev.type === "station") {
+		pendingStation && pendingStation(ev);
+	}
+	else if (ev.type === "rotated") {
+		rotateAreas();
+	}
+	else if (ev.type === "reset") {
+		log("マップが読み込み直されました");
+	}
+}
+
+async function rotateAreas() {
+	try { info = await api("/api/info"); } catch (e) { return; }
+	const sx = info.map[0];
+	for (const st of status.stations) {
+		const a = areaOf(st.id);
+		if (!a) continue;
+		const p1 = [sx - 1 - a.y1, a.x1], p2 = [sx - 1 - a.y2, a.x2];
+		setArea(st.id, { x1: Math.min(p1[0], p2[0]), x2: Math.max(p1[0], p2[0]), y1: Math.min(p1[1], p2[1]), y2: Math.max(p1[1], p2[1]), halt: a.halt });
+	}
+	log("マップが回転しました");
+	await refreshTracks();
+	render();
+}
+
+async function refreshStatus() {
+	status = await api("/api/status");
+	if (!station() && status.stations.length) {
+		stationId = status.stations[0].id;
+		localStore("station", stationId);
+	}
+}
+async function refreshTracks() {
+	const a = currentArea();
+	if (!a) { tracks = { tiles: [], convoys: {} }; indexTracks(); return; }
+	tracks = await api(`/api/tracks?x1=${a.x1}&y1=${a.y1}&x2=${a.x2}&y2=${a.y2}`);
+	indexTracks();
+}
+function indexTracks() {
+	tileIndex = new Map(); xyIndex = new Map();
+	for (const t of tracks.tiles) {
+		tileIndex.set(key(t.p), t);
+		const k = t.p[0] + "," + t.p[1];
+		if (!xyIndex.has(k)) xyIndex.set(k, []);
+		xyIndex.get(k).push(t);
+	}
+}
+
+async function loop() {
+	try {
+		await refreshStatus();
+		await pollEvents();
+		await refreshTracks();
+		setConnected(true);
+		render();
+	} catch (e) {
+		setConnected(false);
+	}
+	setTimeout(loop, 600);
+}
+function setConnected(ok) {
+	if (ok === connected) return;
+	connected = ok;
+	document.getElementById("conndot").classList.toggle("ok", ok);
+	document.getElementById("conntext").textContent = ok ? "ゲームに接続中" : "ゲームに接続できません";
+}
+
+// ---------------------------------------------------------------------------
+// area
+// ---------------------------------------------------------------------------
+function currentArea() {
+	const st = station();
+	if (!st) return null;
+	let a = areaOf(st.id);
+	if (!a) {
+		// from the signals and routes of the station
+		const pts = st.signals.map(s => s.pos);
+		for (const r of status.routes) if (r.station === st.id) pts.push(...r.tiles);
+		if (!pts.length) return null;
+		a = boxAround(pts, 6);
+		setArea(st.id, a);
+	}
+	return a;
+}
+function boxAround(pts, margin) {
+	const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+	return {
+		x1: Math.max(0, Math.min(...xs) - margin), x2: Math.max(...xs) + margin,
+		y1: Math.max(0, Math.min(...ys) - margin), y2: Math.max(...ys) + margin,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// track graph (for drawing and for generating routes)
+// ---------------------------------------------------------------------------
+function neighbour(t, d) {
+	const [dx, dy] = DXY[d];
+	const cand = xyIndex.get((t.p[0] + dx) + "," + (t.p[1] + dy)) || [];
+	let best = null;
+	for (const n of cand) {
+		if (!(n.r & BACK[d])) continue;
+		const dz = Math.abs(n.p[2] - t.p[2]);
+		if (dz > 2) continue;
+		if (!best || dz < Math.abs(best.p[2] - t.p[2])) best = n;
+	}
+	return best;
+}
+// BFS in direction of travel like the game does (uses masked ribi); returns map key -> {t, prev, dir, dist}
+function travel(start, maxDist = 400) {
+	const seen = new Map();
+	const q = [{ t: start, dir: 0, prev: null, dist: 0 }];
+	seen.set(key(start.p) + "|0", q[0]);
+	const res = new Map();
+	while (q.length) {
+		const cur = q.shift();
+		if (!res.has(key(cur.t.p))) res.set(key(cur.t.p), cur);
+		if (cur.dist >= maxDist) continue;
+		let exits = cur.t.m;
+		if (cur.dir) exits &= ~BACK[cur.dir];
+		for (const d of DIRS) {
+			if (!(exits & d)) continue;
+			const n = neighbour(cur.t, d);
+			if (!n) continue;
+			const k = key(n.p) + "|" + d;
+			if (seen.has(k)) continue;
+			const node = { t: n, dir: d, prev: cur, dist: cur.dist + 1 };
+			seen.set(k, node);
+			q.push(node);
+		}
+	}
+	return res;
+}
+// platform groups (番線): connected tiles of one halt
+function platformGroups(haltId) {
+	const tiles = tracks.tiles.filter(t => t.h && (!haltId || t.h === haltId));
+	const left = new Set(tiles.map(t => key(t.p)));
+	const groups = [];
+	for (const t of tiles) {
+		if (!left.has(key(t.p))) continue;
+		const g = [];
+		const q = [t];
+		left.delete(key(t.p));
+		while (q.length) {
+			const c = q.shift();
+			g.push(c);
+			for (const d of DIRS) {
+				if (!(c.r & d)) continue;
+				const n = neighbour(c, d);
+				if (n && left.has(key(n.p))) { left.delete(key(n.p)); q.push(n); }
+			}
+		}
+		groups.push(g);
+	}
+	// number them from north to south, west to east
+	groups.sort((a, b) => {
+		const ay = Math.min(...a.map(t => t.p[1])), by = Math.min(...b.map(t => t.p[1]));
+		const ax = Math.min(...a.map(t => t.p[0])), bx = Math.min(...b.map(t => t.p[0]));
+		return ay - by || ax - bx;
+	});
+	return groups;
+}
+function signalLabel(st, pos) {
+	const i = st.signals.findIndex(s => key(s.pos) === key(pos));
+	return i >= 0 ? "S" + (i + 1) : "信号";
+}
+
+// ---------------------------------------------------------------------------
+// rendering
+// ---------------------------------------------------------------------------
+const svgNS = "http://www.w3.org/2000/svg";
+function el(name, attrs, parent) {
+	const e = document.createElementNS(svgNS, name);
+	for (const k in attrs) e.setAttribute(k, attrs[k]);
+	if (parent) parent.appendChild(e);
+	return e;
+}
+
+function render() {
+	renderHeader();
+	renderMap();
+	if (tab === "run") renderRun();
+	if (tab === "setup") renderSetup();
+}
+
+function renderHeader() {
+	const sel = document.getElementById("stationSel");
+	const opts = status.stations.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+	if (sel.dataset.opts !== opts) { sel.innerHTML = opts || "<option>（連動駅なし）</option>"; sel.dataset.opts = opts; }
+	if (station()) sel.value = stationId;
+	const st = station();
+	for (const b of document.querySelectorAll("#modeBox button")) {
+		b.classList.toggle("on", !!st && (b.dataset.mode === "1") === st.manual);
+		b.disabled = !st;
+	}
+}
+
+function routeStateOfTiles() {
+	const m = new Map();
+	for (const r of status.routes) {
+		if (r.state === "idle") continue;
+		for (const p of r.tiles.slice(1)) m.set(key(p), r.state);
+	}
+	return m;
+}
+
+function renderMap() {
+	const svg = document.getElementById("map");
+	const a = currentArea();
+	document.getElementById("mapEmpty").style.display = a ? "none" : "block";
+	svg.style.display = a ? "block" : "none";
+	if (!a) return;
+	// fit the area into the window
+	const wrap = document.getElementById("mapwrap");
+	const fit = Math.floor(Math.min((wrap.clientWidth - 60) / (a.x2 - a.x1 + 1), (wrap.clientHeight - 60) / (a.y2 - a.y1 + 1)));
+	CELL = Math.max(18, Math.min(56, fit || 34));
+	const sc = CELL / 34; // scale of the symbols
+	const w = (a.x2 - a.x1 + 1) * CELL, h = (a.y2 - a.y1 + 1) * CELL;
+	svg.setAttribute("width", w + 40); svg.setAttribute("height", h + 40);
+	svg.innerHTML = "";
+	const g = el("g", { transform: "translate(30,30)" }, svg);
+	const cx = (p) => (p[0] - a.x1) * CELL + CELL / 2;
+	const cy = (p) => (p[1] - a.y1) * CELL + CELL / 2;
+
+	// grid labels
+	for (let x = a.x1; x <= a.x2; x += 5) el("text", { x: (x - a.x1) * CELL + CELL / 2, y: -10, fill: "#4a5568", "font-size": 10, "text-anchor": "middle" }, g).textContent = x;
+	for (let y = a.y1; y <= a.y2; y += 5) el("text", { x: -8, y: (y - a.y1) * CELL + CELL / 2 + 3, fill: "#4a5568", "font-size": 10, "text-anchor": "end" }, g).textContent = y;
+
+	const st = station();
+	const locked = routeStateOfTiles();
+	const preview = new Set();
+	if (hoverRoute) for (const p of hoverRoute.tiles) preview.add(key(p));
+	const mainZ = mostCommonZ();
+
+	// platforms
+	for (const t of tracks.tiles) {
+		if (!t.h) continue;
+		el("rect", { x: cx(t.p) - CELL / 2 + 1, y: cy(t.p) - CELL / 2 + 1, width: CELL - 2, height: CELL - 2, rx: 4, fill: "var(--platform)" }, g);
+	}
+	// tracks
+	for (const t of tracks.tiles) {
+		const k = key(t.p);
+		let color = "var(--track)";
+		if (locked.get(k)) color = "var(--locked)";
+		if (t.c) color = "var(--occupied)";
+		const dashed = t.p[2] !== mainZ;
+		for (const d of DIRS) {
+			if (!(t.r & d)) continue;
+			const [dx, dy] = DXY[d];
+			el("line", { x1: cx(t.p), y1: cy(t.p), x2: cx(t.p) + dx * CELL / 2, y2: cy(t.p) + dy * CELL / 2,
+				stroke: color, "stroke-width": 6 * sc, "stroke-linecap": "round", "stroke-dasharray": dashed ? "5 4" : "" }, g);
+		}
+		if (preview.has(k)) {
+			el("circle", { cx: cx(t.p), cy: cy(t.p), r: 7 * sc, fill: "none", stroke: "var(--preview)", "stroke-width": 3 }, g);
+		}
+		if (t.d) {
+			el("rect", { x: cx(t.p) - 9 * sc, y: cy(t.p) - 9 * sc, width: 18 * sc, height: 18 * sc, rx: 3, fill: "#3a4252", stroke: "#8a94a3" }, g);
+			el("text", { x: cx(t.p), y: cy(t.p) + 4, "font-size": 11 * sc, "text-anchor": "middle", fill: "#e6e9ee" }, g).textContent = "車";
+		}
+		// a click target for creating routes by hand
+		const hit = el("rect", { x: cx(t.p) - CELL / 2, y: cy(t.p) - CELL / 2, width: CELL, height: CELL, fill: "transparent", class: manualRoute ? "clickable" : "" }, g);
+		hit.addEventListener("click", () => tileClicked(t));
+		hit.appendChild(el("title", {})).textContent = `(${t.p.join(", ")})` + (t.c ? " " + (tracks.convoys[t.c] || "") : "");
+	}
+	// train names (at the tile that is reserved and has the highest reservation... keep it simple: first tile per convoy)
+	const shown = new Set();
+	for (const t of tracks.tiles) {
+		if (!t.c || shown.has(t.c)) continue;
+		shown.add(t.c);
+	}
+	// signals
+	for (const t of tracks.tiles) {
+		if (!t.s) continue;
+		const interlocked = st && st.signals.some(s => key(s.pos) === key(t.p));
+		const travel = singleDir(t.m) || singleDir(t.r & ~BACK[singleDir(t.m) || 0]) || E;
+		// signal head on the left side of the direction of travel (Japanese left-hand running)
+		const [dx, dy] = DXY[travel];
+		const ox = dy * 11 * sc, oy = -dx * 11 * sc;
+		const x = cx(t.p) + ox, y = cy(t.p) + oy;
+		const fill = t.s.aspect === "green" ? "var(--green)" : t.s.aspect === "yellow" ? "var(--yellow)" : "var(--red)";
+		const grp = el("g", { class: "clickable" }, g);
+		// arrow for the direction of travel
+		const ax = cx(t.p) + dx * 10 * sc, ay = cy(t.p) + dy * 10 * sc, a7 = 7 * sc, a5 = 5 * sc;
+		el("polygon", { points: `${ax},${ay} ${ax - dx * a7 + dy * a5},${ay - dy * a7 - dx * a5} ${ax - dx * a7 - dy * a5},${ay - dy * a7 + dx * a5}`, fill: "#cfd6e0" }, grp);
+		el("circle", { cx: x, cy: y, r: (interlocked ? 8 : 6) * sc, fill, stroke: interlocked ? "#fff" : "#0f1319", "stroke-width": interlocked ? 2.5 : 1.5 }, grp);
+		if (interlocked) {
+			el("text", { x: x, y: y - 12 * sc, "font-size": Math.max(11, 12 * sc), "font-weight": 700, "text-anchor": "middle", fill: "#fff" }, grp).textContent = signalLabel(st, t.p);
+		}
+		if (selectedSignal === key(t.p)) el("circle", { cx: x, cy: y, r: 12 * sc, fill: "none", stroke: "var(--accent)", "stroke-width": 2 }, grp);
+		grp.appendChild(el("title", {})).textContent = `${t.s.name} (${t.p.join(", ")})` + (interlocked ? " てこ扱い" : "");
+		grp.addEventListener("click", (e) => { e.stopPropagation(); signalClicked(t, interlocked); });
+	}
+	// halt names
+	const named = new Set();
+	for (const t of tracks.tiles) {
+		if (!t.h || named.has(t.h)) continue;
+		named.add(t.h);
+		const hl = halts.find(x => x.id === t.h);
+		if (hl) el("text", { x: cx(t.p) - CELL / 2 + 3, y: cy(t.p) - CELL / 2 - 3, "font-size": 11, fill: "#9fb3cf" }, g).textContent = hl.name;
+	}
+}
+function singleDir(r) { return DIRS.includes(r) ? r : 0; }
+function mostCommonZ() {
+	const c = new Map();
+	for (const t of tracks.tiles) c.set(t.p[2], (c.get(t.p[2]) || 0) + 1);
+	let best = 0, n = -1;
+	for (const [z, k] of c) if (k > n) { best = z; n = k; }
+	return best;
+}
+
+function renderRun() {
+	const st = station();
+	const lv = document.getElementById("levers");
+	const hint = document.getElementById("runHint");
+	const ap = document.getElementById("approach");
+	if (!st) { lv.innerHTML = ""; ap.innerHTML = ""; hint.textContent = ""; return; }
+
+	// approach indication: a train holds an interlocked signal at danger
+	const waiting = st.signals.filter(s => s.train && s.aspect === "red");
+	ap.innerHTML = waiting.length ? waiting.map(s => `<div>${signalLabel(st, s.pos)}：${esc(s.train)} 待機中</div>`).join("") : `<span class="hint">待っている列車はありません</span>`;
+
+	const routes = status.routes.filter(r => r.station === st.id);
+	const groups = new Map();
+	for (const r of routes) {
+		const k = key(r.start);
+		if (!groups.has(k)) groups.set(k, []);
+		groups.get(k).push(r);
+	}
+	const sig = (k) => st.signals.find(s => key(s.pos) === k);
+	let html = "";
+	for (const [k, rs] of groups) {
+		const s = sig(k);
+		const asp = s ? { green: "進行", red: "停止", yellow: "注意", missing: "なし" }[s.aspect] : "";
+		html += `<div class="group" data-sig="${k}"><div class="group-title">${s ? signalLabel(st, s.pos) : k}　現示：${asp}</div>`;
+		for (const r of rs) {
+			const busy = [...pending.keys()].some(c => c === "set," + r.id || c === "cancel," + r.id);
+			const chip = busy ? `<span class="chip busy">扱い中…</span>` :
+				r.state === "set" ? `<span class="chip set">設定</span>` :
+				r.state === "occupied" ? `<span class="chip occupied">進入</span>` : `<span class="chip">定位</span>`;
+			// tiles[0] is the signal itself, where a waiting train stands
+			const occ = r.occupied.slice(1).some(x => x) && r.state !== "occupied" ? `<span class="sub">在線あり</span>` : "";
+			html += `<button class="lever" data-route="${r.id}"><span><span class="name">${esc(r.name)}</span> ${occ}</span>${chip}</button>`;
+		}
+		html += `</div>`;
+	}
+	if (selectedSignal && !groups.has(selectedSignal)) selectedSignal = null;
+	lv.innerHTML = html || `<span class="hint">進路がありません。「設定」タブで作成してください。</span>`;
+	for (const b of lv.querySelectorAll(".lever")) {
+		const r = routes.find(x => x.id === Number(b.dataset.route));
+		b.addEventListener("click", () => leverClicked(r));
+		b.addEventListener("mouseenter", () => { hoverRoute = r; renderMap(); });
+		b.addEventListener("mouseleave", () => { hoverRoute = null; renderMap(); });
+		if (selectedSignal && key(r.start) !== selectedSignal) b.style.opacity = .4;
+	}
+	hint.textContent = st.manual ? "てこをクリックすると進路を設定／取消します。進路にマウスを重ねると地図上に表示されます。" :
+		"自動モードです。信号は通常どおり自動で動きます。進路を扱うには上の「扱者」に切り替えてください。";
+}
+
+function renderSetup() {
+	const st = station();
+	// halts
+	const hs = document.getElementById("haltSel");
+	const opts = halts.map(h => `<option value="${h.id}">${esc(h.name)}（${h.tiles.length}マス）</option>`).join("");
+	if (hs.dataset.opts !== opts) { const v = hs.value; hs.innerHTML = opts || "<option value=''>鉄道駅がありません</option>"; hs.dataset.opts = opts; if (v) hs.value = v; }
+	// area inputs (do not overwrite while editing)
+	const a = currentArea();
+	for (const [id, v] of [["ax1", a?.x1], ["ax2", a?.x2], ["ay1", a?.y1], ["ay2", a?.y2]]) {
+		const inp = document.getElementById(id);
+		if (document.activeElement !== inp) inp.value = v ?? "";
+	}
+	// signals in the area
+	const sl = document.getElementById("sigList");
+	const sigs = tracks.tiles.filter(t => t.s);
+	sl.innerHTML = !st ? `<span class="hint">先に連動駅を作成してください</span>` : sigs.length ? sigs.map(t => {
+		const on = st.signals.some(s => key(s.pos) === key(t.p));
+		return `<div class="item"><span>${on ? "<b>" + signalLabel(st, t.p) + "</b> " : ""}(${t.p.join(", ")}) ${esc(t.s.name)}</span>
+			<button data-sig="${key(t.p)}">${on ? "解除" : "登録"}</button></div>`;
+	}).join("") : `<span class="hint">範囲内に信号がありません</span>`;
+	for (const b of sl.querySelectorAll("button")) b.addEventListener("click", () => {
+		const t = tileIndex.get(b.dataset.sig);
+		const on = st.signals.some(s => key(s.pos) === b.dataset.sig);
+		toggleSignal(t, on);
+	});
+	// routes
+	const rl = document.getElementById("routeList");
+	const routes = st ? status.routes.filter(r => r.station === st.id) : [];
+	rl.innerHTML = routes.map(r => `<div class="item" data-route="${r.id}"><span>${esc(r.name)} <span class="hint">${r.tiles.length}マス</span></span><button data-del="${r.id}">削除</button></div>`).join("") || `<span class="hint">進路はまだありません</span>`;
+	for (const it of rl.querySelectorAll(".item")) {
+		const r = routes.find(x => x.id === Number(it.dataset.route));
+		it.addEventListener("mouseenter", () => { hoverRoute = r; renderMap(); });
+		it.addEventListener("mouseleave", () => { hoverRoute = null; renderMap(); });
+	}
+	for (const b of rl.querySelectorAll("button[data-del]")) b.addEventListener("click", () => {
+		const r = routes.find(x => x.id === Number(b.dataset.del));
+		if (confirm(`進路「${r.name}」を削除しますか？`)) command("rt_del," + r.id, "進路の削除 " + r.name);
+	});
+	document.getElementById("routeHint").textContent = manualRoute ?
+		(manualRoute.start ? "着点の線路（番線の端など）をクリックしてください。（Esc で中止）" : "始点のてこ扱い信号をクリックしてください。（Esc で中止）") :
+		"自動作成: 各てこ扱い信号から各番線へ、出発信号から区域の出口への進路を作ります。手で作る: 始点の信号 → 着点の線路の順にクリックします。";
+	document.getElementById("btnManualRoute").textContent = manualRoute ? "中止" : "手で作る";
+}
+
+// ---------------------------------------------------------------------------
+// actions
+// ---------------------------------------------------------------------------
+function leverClicked(r) {
+	const st = station();
+	if (!st.manual) { toast("自動モードです。「扱者」に切り替えてください", true); return; }
+	if (r.state === "idle") command("set," + r.id, "進路設定 " + r.name);
+	else if (r.state === "set") command("cancel," + r.id, "進路取消 " + r.name);
+	else toast("列車が進入中です。通過すると自動で解除されます", true);
+}
+
+function signalClicked(t, interlocked) {
+	if (tab === "setup") {
+		if (manualRoute && !manualRoute.start) {
+			if (!interlocked) { toast("始点は、てこ扱い信号に登録した信号を選んでください"); return; }
+			manualRoute.start = t.p;
+			render();
+			return;
+		}
+		if (manualRoute) { tileClicked(t); return; }
+		toggleSignal(t, interlocked);
+		return;
+	}
+	// run tab: show only the levers of this signal
+	selectedSignal = selectedSignal === key(t.p) ? null : key(t.p);
+	render();
+}
+
+function toggleSignal(t, on) {
+	const st = station();
+	if (!st) return;
+	command(`${on ? "sig_del" : "sig_add"},${st.id},${t.p.join(",")}`, `${on ? "解除" : "登録"} 信号(${t.p.join(",")})`);
+}
+
+async function tileClicked(t) {
+	if (!manualRoute || !manualRoute.start) return;
+	const st = station();
+	const start = manualRoute.start;
+	const name = prompt("進路の名前", `${signalLabel(st, start)}→(${t.p[0]},${t.p[1]})`);
+	manualRoute = null;
+	render();
+	if (!name) return;
+	const r = await commandResult(`rt_def,${st.id},${start.join(",")},${t.p.join(",")},${name}`);
+	if (!r.ok) toast(tr(r.error));
+}
+
+let pendingStation = null;
+async function newStation() {
+	const h = halts.find(x => x.id === Number(document.getElementById("haltSel").value));
+	if (!h) { toast("駅を選んでください"); return; }
+	const area = boxAround(h.tiles, 10);
+	area.halt = h.id;
+	const got = new Promise((resolve) => { pendingStation = resolve; setTimeout(() => resolve(null), 15000); });
+	command("st_new," + h.name, "連動駅の作成 " + h.name);
+	const ev = await got;
+	pendingStation = null;
+	if (!ev) return;
+	setArea(ev.id, area);
+	stationId = ev.id;
+	localStore("station", stationId);
+	await refreshStatus();
+	await refreshTracks();
+	toast(`「${h.name}」を作成しました。次に場内・出発信号を登録してください`, true);
+	render();
+}
+
+async function autoRoutes() {
+	// work on the latest state (a signal may just have been registered)
+	try { await refreshStatus(); await refreshTracks(); } catch (e) {}
+	const st = station();
+	if (!st) return;
+	if (!st.signals.length) { toast("先にてこ扱い信号を登録してください"); return; }
+	const a = currentArea();
+	const groups = platformGroups(a.halt);
+	if (!groups.length) { toast("範囲内にホームがありません"); return; }
+	const existing = new Set(status.routes.filter(r => r.station === st.id).map(r => key(r.start) + ">" + key(r.end)));
+	const inArea = (p) => p[0] >= a.x1 && p[0] <= a.x2 && p[1] >= a.y1 && p[1] <= a.y2;
+	const groupOf = new Map();
+	groups.forEach((g, i) => g.forEach(t => groupOf.set(key(t.p), i)));
+	const todo = [];
+
+	for (const s of st.signals) {
+		const t = tileIndex.get(key(s.pos));
+		if (!t) continue;
+		const reach = travel(t);
+		const startGroup = groupOf.get(key(t.p));
+		let toPlatform = 0;
+		groups.forEach((g, i) => {
+			if (i === startGroup) return;
+			// the far end of the platform seen from the signal
+			let best = null;
+			for (const pt of g) {
+				const n = reach.get(key(pt.p));
+				if (n && (!best || n.dist > best.dist)) best = n;
+			}
+			if (!best) return;
+			// the route must not run through another platform first
+			for (let n = best.prev; n; n = n.prev) {
+				const gi = groupOf.get(key(n.t.p));
+				if (gi !== undefined && gi !== i && gi !== startGroup) return;
+			}
+			toPlatform++;
+			todo.push({ start: s.pos, end: best.t.p, name: `${signalLabel(st, s.pos)}→${i + 1}番線` });
+		});
+		if (toPlatform === 0) {
+			// departure signal: routes to the exits of the area (next signal or edge of the area)
+			let k = 0;
+			for (const [, n] of reach) {
+				if (n.t === t) continue;
+				if (groupOf.has(key(n.t.p)) && groupOf.get(key(n.t.p)) !== startGroup) continue;
+				const atSignal = n.t.s && n.dist > 0;
+				const atEdge = !inArea(n.t.p) || DIRS.some(d => (n.t.m & d) && !(n.dir && d === BACK[n.dir]) && !neighbour(n.t, d));
+				if (!atSignal && !atEdge) continue;
+				// stop in front of the next signal
+				const end = atSignal && n.prev ? n.prev.t.p : n.t.p;
+				// only the first such tile on each branch
+				let first = true;
+				for (let m = n.prev; m && m.t !== t; m = m.prev) if (m.t.s) { first = false; break; }
+				if (!first) continue;
+				todo.push({ start: s.pos, end, name: `${signalLabel(st, s.pos)}→出口${++k}` });
+			}
+		}
+	}
+	const fresh = todo.filter(r => !existing.has(key(r.start) + ">" + key(r.end)));
+	if (!fresh.length) { toast("新しく作れる進路はありませんでした（信号の向きと登録を確認してください）", true); return; }
+	let ok = 0, ng = 0;
+	for (const r of fresh) {
+		const res = await commandResult(`rt_def,${st.id},${r.start.join(",")},${r.end.join(",")},${r.name}`);
+		res.ok ? ok++ : ng++;
+	}
+	toast(`進路を ${ok} 本作成しました` + (ng ? `（${ng} 本は作れませんでした）` : ""), true);
+}
+
+// ---------------------------------------------------------------------------
+// ui
+// ---------------------------------------------------------------------------
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+let toastTimer = null;
+function toast(text, info) {
+	const t = document.getElementById("toast");
+	t.textContent = text;
+	t.className = info ? "info" : "";
+	t.style.display = "block";
+	clearTimeout(toastTimer);
+	toastTimer = setTimeout(() => t.style.display = "none", 4500);
+}
+function log(text, cls) {
+	const l = document.getElementById("log");
+	const d = document.createElement("div");
+	if (cls) d.className = cls;
+	d.textContent = new Date().toLocaleTimeString() + "  " + text;
+	l.prepend(d);
+	while (l.childNodes.length > 300) l.removeChild(l.lastChild);
+}
+
+document.getElementById("stationSel").addEventListener("change", (e) => {
+	stationId = Number(e.target.value);
+	localStore("station", stationId);
+	selectedSignal = null;
+	refreshTracks().then(render);
+});
+for (const b of document.querySelectorAll("#modeBox button")) b.addEventListener("click", () => {
+	const st = station();
+	if (st) command(`st_mode,${st.id},${b.dataset.mode}`, b.dataset.mode === "1" ? "扱者モードへ" : "自動モードへ");
+});
+for (const b of document.querySelectorAll("nav button")) b.addEventListener("click", async () => {
+	tab = b.dataset.tab;
+	for (const x of document.querySelectorAll("nav button")) x.classList.toggle("on", x === b);
+	for (const s of ["run", "setup", "log"]) document.getElementById("tab-" + s).hidden = s !== tab;
+	manualRoute = null;
+	if (tab === "setup") { try { halts = (await api("/api/halts")).halts; } catch (e) {} }
+	render();
+});
+document.getElementById("btnNewStation").addEventListener("click", newStation);
+document.getElementById("btnArea").addEventListener("click", () => {
+	const st = station();
+	if (!st) return;
+	const v = (id) => Number(document.getElementById(id).value);
+	const old = areaOf(st.id) || {};
+	setArea(st.id, { x1: Math.min(v("ax1"), v("ax2")), x2: Math.max(v("ax1"), v("ax2")), y1: Math.min(v("ay1"), v("ay2")), y2: Math.max(v("ay1"), v("ay2")), halt: old.halt });
+	refreshTracks().then(render);
+});
+document.getElementById("btnAreaFit").addEventListener("click", () => {
+	const st = station();
+	const a = st && areaOf(st.id);
+	const h = halts.find(x => x.id === (a && a.halt)) || halts.find(x => x.name === (st && st.name));
+	if (!h) { toast("対応する駅が見つかりません"); return; }
+	setArea(st.id, Object.assign(boxAround(h.tiles, 10), { halt: h.id }));
+	refreshTracks().then(render);
+});
+document.getElementById("btnAutoRoutes").addEventListener("click", autoRoutes);
+document.getElementById("btnManualRoute").addEventListener("click", () => {
+	manualRoute = manualRoute ? null : { start: null };
+	render();
+});
+document.getElementById("btnDelStation").addEventListener("click", () => {
+	const st = station();
+	if (st && confirm(`連動駅「${st.name}」と、その進路をすべて削除しますか？`)) command("st_del," + st.id, "連動駅の削除 " + st.name);
+});
+window.addEventListener("resize", () => renderMap());
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && manualRoute) { manualRoute = null; render(); } });
+
+(async () => {
+	try { halts = (await api("/api/halts")).halts; info = await api("/api/info"); } catch (e) {}
+	// skip the old events of this game session
+	try { lastEvent = (await api("/api/events?since=4294967295")).last; } catch (e) {}
+	loop();
+})();
+</script>
+</body>
+</html>

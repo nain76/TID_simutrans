@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "il_manager.h"
+#include "il_json.h"
 
 #include "../simworld.h"
 #include "../simconvoi.h"
@@ -68,36 +69,6 @@ static const char *state_name(uint8 state)
 		case IL_OCCUPIED: return "occupied";
 		default:          return "idle";
 	}
-}
-
-
-static void append_json_string(cbuffer_t &buf, const char *s)
-{
-	buf.append("\"");
-	for(  const char *c = s ? s : "";  *c;  c++  ) {
-		switch(  *c  ) {
-			case '"':  buf.append("\\\""); break;
-			case '\\': buf.append("\\\\"); break;
-			case '\n': buf.append("\\n"); break;
-			case '\r': buf.append("\\r"); break;
-			case '\t': buf.append("\\t"); break;
-			default:
-				if(  (unsigned char)*c < 0x20  ) {
-					buf.printf("\\u%04x", (unsigned)(unsigned char)*c);
-				}
-				else {
-					char tmp[2] = { *c, 0 };
-					buf.append(tmp);
-				}
-		}
-	}
-	buf.append("\"");
-}
-
-
-static void append_json_pos(cbuffer_t &buf, koord3d pos)
-{
-	buf.printf("[%d,%d,%d]", pos.x, pos.y, pos.z);
 }
 
 
@@ -832,7 +803,15 @@ void interlocking_manager_t::get_status_json(cbuffer_t &buf) const
 			buf.append(i ? "," : "");
 			buf.append("{\"pos\":");
 			append_json_pos(buf, pos);
-			buf.printf(",\"aspect\":\"%s\"}", sig == NULL ? "missing" : sig->get_state() == roadsign_t::STATE_GREEN ? "green" : sig->get_state() == roadsign_t::STATE_YELLOW ? "yellow" : "red");
+			buf.printf(",\"aspect\":\"%s\"", sig == NULL ? "missing" : sig->get_state() == roadsign_t::STATE_GREEN ? "green" : sig->get_state() == roadsign_t::STATE_YELLOW ? "yellow" : "red");
+			// approach indication: the train that holds the signal tile (waiting at or approaching the signal)
+			const schiene_t *sch = get_rail(pos);
+			const convoihandle_t holder = sch ? sch->get_reserved_convoi() : convoihandle_t();
+			if(  holder.is_bound()  ) {
+				buf.append(",\"train\":");
+				append_json_string(buf, holder->get_name());
+			}
+			buf.append("}");
 		}
 		buf.append("]}");
 	}

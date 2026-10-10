@@ -137,9 +137,9 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 
 ### H7 ビルド設定
 
-- `Makefile`: `SOURCES += simworld.cc` の後に `interlocking/il_bridge.cc` `il_hooks.cc` `il_manager.cc` `il_tool.cc`。
-- `cmake/SimutransSourceList.cmake`: `simworld.cc` の後に同じ 4 ファイル。
-- `Simutrans-Main.vcxitems`: `simworld.cc` の `ClCompile` の後に同じ 4 ファイル。
+- `Makefile`: `SOURCES += simworld.cc` の後に `interlocking/il_bridge.cc` `il_hooks.cc` `il_manager.cc` `il_query.cc` `il_tool.cc`。
+- `cmake/SimutransSourceList.cmake`: `simworld.cc` の後に同じ 5 ファイル。
+- `Simutrans-Main.vcxitems`: `simworld.cc` の `ClCompile` の後に同じ 5 ファイル。
 
 ## `interlocking/` から使っている本体の関数
 
@@ -152,7 +152,8 @@ v60 でこれらの名前や引数が変わっていたら、`interlocking/` 側
 | `route_t::calc_route()` / `remove_koord_from()` / `append()` | 同上 |
 | `schiene_t::is_reserved()` / `get_reserved_convoi()` | 進路の設定判定・自動解除 |
 | `grund_t::get_neighbour()` / `weg_t::get_ribi()` | 進路の探索 |
-| `haltestelle_t::get_halt()` | 着点が番線かどうかの判定 |
+| `haltestelle_t::get_halt()` / `get_alle_haltestellen()` / `get_tiles()` | 着点が番線かどうかの判定、盤の駅一覧（`il_query.cc`） |
+| `planquadrat_t::get_boden_bei()` / `grund_t::get_halt()` / `has_depot()` | 盤の配線略図（`il_query.cc`） |
 | `signal_t::set_state()` / `get_state()` | 信号の現示 |
 | `tool_t::simple_tool[]` / `karte_t::set_tool()` | ブリッジからのコマンド実行 |
 
@@ -160,6 +161,15 @@ v60 でこれらの名前や引数が変わっていたら、`interlocking/` 側
 `il_manager.cc` の `on_signal()` に書いている。** OTRP 側でこの処理が変わっていたら、こちらにも反映するか確認する。
 
 ## テスト
+
+自動テストは 2 つある。どちらもヘッドレス版のゲームを起動して使う。
+
+- `run_test.py`（Python）: 連動装置の動作（行単位プロトコル）
+- `panel_test.mjs`（Node.js + Playwright）: Web 盤を実際のブラウザで操作する
+
+```sh
+NODE_PATH=$(npm root -g) node interlocking/tests/panel_test.mjs build/default/sim <作業ディレクトリ> <スクリーンショットの保存先>
+```
 
 `interlocking/tests/run_test.py` が、ヘッドレス版のゲームを起動して外部の盤と同じ経路（TCP ブリッジ）で操作し、
 次を確認する: てこ扱い信号で列車が止まる／敵対進路の拒否／扱者が選んだ番線を通る／通過後の自動解除／

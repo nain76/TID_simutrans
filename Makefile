@@ -591,6 +591,7 @@ SOURCES += simworld.cc
 SOURCES += interlocking/il_bridge.cc
 SOURCES += interlocking/il_hooks.cc
 SOURCES += interlocking/il_manager.cc
+SOURCES += interlocking/il_query.cc
 SOURCES += interlocking/il_tool.cc
 SOURCES += squirrel/sq_extensions.cc
 SOURCES += squirrel/sqstdlib/sqstdaux.cc

@@ -1,8 +1,8 @@
 diff --git a/Makefile b/Makefile
-index b4ccb0c..55784c2 100644
+index b4ccb0c..4076558 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -587,6 +587,11 @@ SOURCES += simtool-scripted.cc
+@@ -587,6 +587,12 @@ SOURCES += simtool-scripted.cc
  SOURCES += simtool-script-generator.cc
  SOURCES += simware.cc
  SOURCES += simworld.cc
@@ -10,15 +10,16 @@ index b4ccb0c..55784c2 100644
 +SOURCES += interlocking/il_bridge.cc
 +SOURCES += interlocking/il_hooks.cc
 +SOURCES += interlocking/il_manager.cc
++SOURCES += interlocking/il_query.cc
 +SOURCES += interlocking/il_tool.cc
  SOURCES += squirrel/sq_extensions.cc
  SOURCES += squirrel/sqstdlib/sqstdaux.cc
  SOURCES += squirrel/sqstdlib/sqstdblob.cc
 diff --git a/Simutrans-Main.vcxitems b/Simutrans-Main.vcxitems
-index 29bfd41..ed49e02 100644
+index 29bfd41..cfdce12 100644
 --- a/Simutrans-Main.vcxitems
 +++ b/Simutrans-Main.vcxitems
-@@ -42,6 +42,11 @@
+@@ -42,6 +42,12 @@
      <ClCompile Include="$(MSBuildThisFileDirectory)simtool-scripted.cc" />
      <ClCompile Include="$(MSBuildThisFileDirectory)simware.cc" />
      <ClCompile Include="$(MSBuildThisFileDirectory)simworld.cc" />
@@ -26,21 +27,23 @@ index 29bfd41..ed49e02 100644
 +    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_bridge.cc" />
 +    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_hooks.cc" />
 +    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_manager.cc" />
++    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_query.cc" />
 +    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_tool.cc" />
      <ClCompile Include="$(MSBuildThisFileDirectory)unicode.cc" />
      <ClCompile Include="$(MSBuildThisFileDirectory)bauer\brueckenbauer.cc" />
      <ClCompile Include="$(MSBuildThisFileDirectory)bauer\fabrikbauer.cc" />
 diff --git a/cmake/SimutransSourceList.cmake b/cmake/SimutransSourceList.cmake
-index 726627f..1ba781a 100644
+index 726627f..3102b1c 100644
 --- a/cmake/SimutransSourceList.cmake
 +++ b/cmake/SimutransSourceList.cmake
-@@ -296,6 +296,10 @@ target_sources(simutrans PRIVATE
+@@ -296,6 +296,11 @@ target_sources(simutrans PRIVATE
  		simtool-scripted.cc
  		simware.cc
  		simworld.cc
 +		interlocking/il_bridge.cc # TID_IL H7
 +		interlocking/il_hooks.cc # TID_IL H7
 +		interlocking/il_manager.cc # TID_IL H7
++		interlocking/il_query.cc # TID_IL H7
 +		interlocking/il_tool.cc # TID_IL H7
  		squirrel/sq_extensions.cc
  		squirrel/sqstdlib/sqstdaux.cc
