@@ -173,7 +173,7 @@ index db4ffd0b6..11dfb6be6 100644
  		if (env_t::quit_simutrans){
  			break;
 diff --git a/vehicle/simvehicle.cc b/vehicle/simvehicle.cc
-index d8e7686c2..79691b3ca 100644
+index d8e7686c2..549a74e93 100644
 --- a/vehicle/simvehicle.cc
 +++ b/vehicle/simvehicle.cc
 @@ -63,6 +63,7 @@
@@ -195,3 +195,13 @@ index d8e7686c2..79691b3ca 100644
  	// simple signal: fail, if next block is not free
  	if(  sig_desc->is_simple_signal()  ) {
  
+@@ -5314,6 +5319,9 @@ bool rail_vehicle_t::can_enter_tile(const grund_t *gr, sint32 &restart_speed, ui
+ 					}
+ 				}
+ 
++#ifdef TID_INTERLOCKING // TID_IL H8: virtual departure signal of the interlocking panel
++				{ bool il_result; if(  interlocking_hook_departure( this, restart_speed, il_result )  ) { return il_result; } }
++#endif
+ 				if (!(w->has_signal()  ||  gr_current->get_crossing())) {
+ 					// free track => reserve up to next signal
+ 					if(  cnv->is_drive_without_reservation()  ) {

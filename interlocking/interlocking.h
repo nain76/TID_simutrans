@@ -31,6 +31,13 @@ class loadsave_t;
  */
 bool interlocking_hook_signal(rail_vehicle_t *v, uint16 next_block, sint32 &restart_speed, bool call_by_step, bool &result);
 
+/**
+ * H8: called from rail_vehicle_t::can_enter_tile() when a train wants to start (CAN_START),
+ * before it reserves its first block. Same return convention as interlocking_hook_signal().
+ * Used for virtual departure signals (platforms without a real departure signal).
+ */
+bool interlocking_hook_departure(rail_vehicle_t *v, sint32 &restart_speed, bool &result);
+
 /// H2: called once per karte_t::step() (deterministic, runs on every client)
 void interlocking_hook_step();
 

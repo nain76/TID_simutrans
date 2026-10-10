@@ -147,7 +147,25 @@ def run(args):
         check(not p.cmd(f"set,{r1['id']}")["ok"], "setting a route in automatic mode is refused")
         check(p.cmd(f"st_mode,{sid},1")["ok"], "switch to operator mode")
 
-        print("[2] the train waits at S1")
+        # station B: dead-end platform without a departure signal -> virtual departure signal
+        check(p.cmd("st_new,B terminus")["ok"], "create station B")
+        sidb = [st for st in p.status()["stations"] if st["name"] == "B terminus"][0]["id"]
+        check(not p.cmd(f"dep_add,{sidb},12,5,0")["ok"], "virtual departure on a plain track is refused")
+        check(p.cmd(f"dep_add,{sidb},14,5,0")["ok"], "register platform B as virtual departure signal (clicked at the buffer end)")
+        dep = [st for st in p.status()["stations"] if st["id"] == sidb][0]["departures"][0]
+        check(dep["pos"] == [13, 5, 0], f"departure end found automatically: {dep['pos']}")
+        check(p.cmd(f"rt_def,{sidb},13,5,0,9,5,0,B-out")["ok"], "define departure route from platform B")
+        rb = [r for r in p.status()["routes"] if r["name"] == "B-out"][0]
+        check(rb["tiles"][0] == [13, 5, 0] and rb["tiles"][-1] == [9, 5, 0], "departure route runs from the platform end to (9,5)")
+        check(p.cmd(f"st_mode,{sidb},1")["ok"], "station B in operator mode")
+
+        print("[2] conflicting routes (before the train runs)")
+        check(p.cmd(f"set,{r1['id']}")["ok"], "set route 1")
+        res = p.cmd(f"set,{r2['id']}")
+        check(not res["ok"] and res.get("error") == "another route from this signal is set", f"route 2 refused while route 1 is set ({res.get('error')})")
+        check(p.cmd(f"cancel,{r1['id']}")["ok"], "cancel route 1")
+
+        print("[3] the train waits at S1")
         cid = p.request("debug_convoys")["convoys"][0]["id"]
         sched = "0|0|0|2|0|14,5,0,0,0,0,0,0,0,0,0,100,0,0|7,5,0,0,0,0,0,0,0,0,0,100,0,0|"
         p.request(f"debug_tool {simple_tool_id('TOOL_CHANGE_CONVOI')} g,{cid},{sched}")
@@ -159,12 +177,6 @@ def run(args):
         check(cnv["state"] in (8, 9, 13) and cnv["speed"] == 0 and cnv["pos"] == [3, 5, 0],
               f"train left the depot and waits in front of S1 (pos {cnv['pos']}, state {cnv['state']})")
         check(sig["aspect"] == "red", "S1 shows danger")
-
-        print("[3] conflicting routes")
-        check(p.cmd(f"set,{r1['id']}")["ok"], "set route 1")
-        res = p.cmd(f"set,{r2['id']}")
-        check(not res["ok"], f"route 2 refused while route 1 is set ({res.get('error')})")
-        check(p.cmd(f"cancel,{r1['id']}")["ok"], "cancel route 1")
 
         print("[4] the train follows route 2")
         seen = []
@@ -191,6 +203,25 @@ def run(args):
         check(first_p2 is not None and first_p2 < first_b, "train ran over platform 2 (y=6) on its way to B")
         check(not any(pos[1] == 5 and 6 <= pos[0] <= 8 for pos in seen[:first_b]), "train did not use platform 1")
 
+        print("[4b] virtual departure signal at the dead-end platform B")
+        def b_departure():
+            st = [st for st in p.status()["stations"] if st["id"] == sidb][0]
+            return st["departures"][0]
+        wait_until(lambda: b_departure().get("waiting"), 120, "train waiting for departure at B")
+        check(True, f"train ready to depart at B: {b_departure().get('train')}")
+        stay = []
+        for _ in range(12):
+            stay.append(p.request("debug_convoys")["convoys"][0]["pos"])
+            time.sleep(0.5)
+        check(all(pos[0] >= 13 for pos in stay), "train does not depart without a departure route")
+        check(p.cmd(f"set,{rb['id']}")["ok"], "set the departure route B-out")
+        p.wait_event(lambda e: e["type"] == "route" and e["id"] == rb["id"] and e["state"] == "occupied", 60)
+        check(True, "train admitted into B-out")
+        wait_until(lambda: p.request("debug_convoys")["convoys"][0]["pos"][0] <= 11, 60, "train left B")
+        check(True, "train departed from B")
+        p.wait_event(lambda e: e["type"] == "route" and e["id"] == rb["id"] and e["state"] == "idle", 120)
+        check(True, "departure route released automatically")
+
         print("[5] rotate the map")
         rot = simple_tool_id("TOOL_ROTATE90")
         before = p.status()
@@ -198,6 +229,8 @@ def run(args):
         p.wait_event(lambda e: e["type"] == "rotated", 30)
         after = p.status()
         s_after = after["stations"][0]["signals"][0]
+        d_after = [st for st in after["stations"] if st["id"] == sidb][0]["departures"][0]
+        check(d_after["pos"] != [13, 5, 0] and d_after["pos"] in d_after["tiles"], f"virtual departure follows the rotation ({d_after['pos']})")
         check(s_after["pos"] != [3, 5, 0] and s_after["aspect"] != "missing", f"signal follows the rotation ({s_after['pos']})")
         for _ in range(3):
             p.request(f"debug_tool {rot} ")
@@ -206,7 +239,9 @@ def run(args):
         check(p.status()["stations"][0]["signals"][0]["pos"] == [3, 5, 0], "four rotations restore the signal position")
 
         print("[6] save and load")
-        check(p.cmd(f"set,{r1['id']}")["ok"], "set route 1 before saving")
+        # set any free route (the train may just be running over one of them)
+        set_ok = wait_until(lambda: next((rid for rid in (r2["id"], rb["id"], r1["id"]) if p.cmd(f"set,{rid}")["ok"]), None), 90, "a free route to set")
+        check(True, f"route {set_ok} set before saving")
         saved = p.status()
         p.request("debug_save il_test")
         time.sleep(2)
@@ -222,8 +257,8 @@ def run(args):
     try:
         p = Panel(PORT)
         loaded = wait_until(lambda: (lambda s: s if s["stations"] else None)(p.status()), 60, "loaded status")
-        strip_st = lambda sts: [(st["id"], st["name"], st["owner"], st["manual"], [sg["pos"] for sg in st["signals"]]) for st in sts]
-        check(strip_st(loaded["stations"]) == strip_st(saved["stations"]), "stations restored (name, owner, mode, signals)")
+        strip_st = lambda sts: [(st["id"], st["name"], st["owner"], st["manual"], [sg["pos"] for sg in st["signals"]], [(d["pos"], d["tiles"]) for d in st["departures"]]) for st in sts]
+        check(strip_st(loaded["stations"]) == strip_st(saved["stations"]), "stations restored (name, owner, mode, signals, virtual departures)")
         strip = lambda rs: [(r["id"], r["name"], r["state"], r["tiles"]) for r in rs]
         check(strip(loaded["routes"]) == strip(saved["routes"]), "routes and their states restored")
     finally:

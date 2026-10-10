@@ -90,6 +90,16 @@ aside h2:first-child { margin-top: 0; }
 .hint { color: var(--muted); font-size: 12px; }
 .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .list { display: flex; flex-direction: column; gap: 4px; }
+.explain { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin: 14px 0 4px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
+.check { display: flex; flex-direction: column; gap: 4px; padding: 7px 9px; background: var(--panel2); border-radius: 6px; border-left: 3px solid var(--line); }
+.check.ok { border-left-color: var(--green); }
+.check.warn { border-left-color: var(--yellow); }
+.check .head { display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+.check .msg { font-size: 12px; color: var(--muted); }
+.check .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.check button { font-size: 12px; padding: 3px 9px; }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #2f3846; color: var(--muted); margin-left: 4px; }
 .list .owner { font-size: 12px; color: var(--muted); margin: 8px 0 2px; }
 .list .item { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 5px 8px; background: var(--panel2); border-radius: 6px; }
 #log { font: 12px/1.6 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
@@ -167,14 +177,40 @@ svg text { font-family: inherit; }
 				<button id="btnAreaFit">駅に合わせる</button>
 			</div>
 
-			<h2>3. てこ扱い信号</h2>
-			<p class="hint">地図上の信号をクリックすると、てこ扱い（連動盤で扱う信号）の登録・解除ができます。場内信号・出発信号を登録してください。</p>
-			<div class="row"><span class="hint">並べ替え</span>
-				<select id="sigSort"><option value="owner">会社ごと</option><option value="pos">位置（北から）</option></select>
+			<div class="explain">
+				<svg viewBox="0 0 300 92" width="100%" role="img" aria-label="入口と出口の説明図">
+					<g stroke="#8a94a3" stroke-width="4" fill="none" stroke-linecap="round">
+						<path d="M8 30 H292"/><path d="M96 30 L116 62 H184 L204 30"/>
+					</g>
+					<rect x="124" y="20" width="52" height="20" rx="3" fill="#2a3a52"/><rect x="124" y="52" width="52" height="20" rx="3" fill="#2a3a52"/>
+					<text x="150" y="34" font-size="10" fill="#cfd6e0" text-anchor="middle">1番線</text>
+					<text x="150" y="66" font-size="10" fill="#cfd6e0" text-anchor="middle">2番線</text>
+					<circle cx="66" cy="20" r="6" fill="#ff5a5f" stroke="#fff" stroke-width="2"/><text x="66" y="11" font-size="9" fill="#fff" text-anchor="middle">場内</text>
+					<circle cx="232" cy="20" r="6" fill="#ff5a5f" stroke="#fff" stroke-width="2"/><text x="232" y="11" font-size="9" fill="#fff" text-anchor="middle">出発</text>
+					<text x="8" y="50" font-size="11" fill="#f2c94c">入口 →</text>
+					<text x="246" y="50" font-size="11" fill="#f2c94c">→ 出口</text>
+					<text x="150" y="88" font-size="9" fill="#8b95a5" text-anchor="middle">入口の信号から番線へ、番線（出発信号）から出口へ、進路を作る</text>
+				</svg>
 			</div>
-			<div class="list" id="sigList"></div>
 
-			<h2>4. 進路</h2>
+			<h2>3. 入口（駅に入ってくる線路）</h2>
+			<p class="hint">区域の外から駅へ入れる線路を自動で調べています。<b>すべての入口が「✔」になるように</b>、入口の信号（場内信号）を登録してください。登録した信号は、扱者モードでは進路を引くまで停止になります。</p>
+			<div class="list" id="entryList"></div>
+
+			<h2>4. 出口（番線から出ていく線路）</h2>
+			<p class="hint">番線の端ごとに、出ていく列車を管理する方法を選びます。ホームの先に出発信号があれば「登録」、信号がない番線（行き止まり式など）は「仮想出発信号」にします。仮想出発信号はマップに何も置かず、扱者モードのときだけ、進路を引くまで列車をホームで待たせます。</p>
+			<div class="list" id="exitList"></div>
+
+			<details id="otherSigs">
+				<summary>5. その他の信号（手動で登録する）</summary>
+				<p class="hint">上の自動判定で出てこない信号を登録したいときに使います。地図上の信号をクリックしても登録・解除できます。</p>
+				<div class="row"><span class="hint">並べ替え</span>
+					<select id="sigSort"><option value="owner">会社ごと</option><option value="pos">位置（北から）</option></select>
+				</div>
+				<div class="list" id="sigList"></div>
+			</details>
+
+			<h2>6. 進路</h2>
 			<div class="row">
 				<button class="primary" id="btnAutoRoutes">進路を自動作成</button>
 				<button id="btnManualRoute">手で作る</button>
@@ -581,10 +617,10 @@ function neighbour(t, d) {
 	return best;
 }
 // BFS in direction of travel like the game does (uses masked ribi); returns map key -> {t, prev, dir, dist}
-function travel(start, maxDist = 400) {
+function travel(start, maxDist = 400, startDir = 0) {
 	const seen = new Map();
-	const q = [{ t: start, dir: 0, prev: null, dist: 0 }];
-	seen.set(key(start.p) + "|0", q[0]);
+	const q = [{ t: start, dir: startDir, prev: null, dist: 0 }];
+	seen.set(key(start.p) + "|" + startDir, q[0]);
 	const res = new Map();
 	while (q.length) {
 		const cur = q.shift();
@@ -636,7 +672,102 @@ function platformGroups(haltId) {
 }
 function signalLabel(st, pos) {
 	const i = st.signals.findIndex(s => key(s.pos) === key(pos));
-	return i >= 0 ? "S" + (i + 1) : "信号";
+	if (i >= 0) return "S" + (i + 1);
+	const d = (st.departures || []).find(x => key(x.pos) === key(pos));
+	if (d) {
+		const g = platformGroups(stationHalt(currentArea())).findIndex(gr => gr.some(t => key(t.p) === key(pos)));
+		return (g >= 0 ? (g + 1) + "番線" : "番線") + "出発";
+	}
+	return "信号";
+}
+const isDepartureAnchor = (st, pos) => !!(st && (st.departures || []).some(d => key(d.pos) === key(pos)));
+const dirName = (d) => ({ [N]: "北", [E]: "東", [S]: "南", [W]: "西" }[d] || "");
+
+/*
+ * Checks of the interlocking area for the setup tab.
+ * explore(): from a tile entered with direction dir, follows the track in the direction of travel
+ * and stops at every signal (recorded) and at target tiles (recorded); returns also all tiles seen.
+ */
+function explore(start, dir, isTarget, isStop) {
+	const signals = [], targets = [], seen = new Set(), tiles = new Set();
+	const q = [[start, dir]];
+	while (q.length) {
+		const [t, d] = q.shift();
+		const k = key(t.p) + "|" + d;
+		if (seen.has(k)) continue;
+		seen.add(k);
+		tiles.add(key(t.p));
+		if (t.s) {
+			// a signal counts only if the train may pass it in this direction (one-way signals block the other)
+			if (!d || (t.m & d)) { if (!signals.includes(t)) signals.push(t); }
+			continue;
+		}
+		if (isTarget(t)) { if (!targets.includes(t)) targets.push(t); continue; }
+		if (isStop && isStop(t)) continue;
+		const exits = t.m & ~(d ? BACK[d] : 0);
+		for (const e of DIRS) {
+			if (!(exits & e)) continue;
+			const n = neighbour(t, e);
+			if (n) q.push([n, e]);
+		}
+	}
+	return { signals, targets, tiles: [...tiles] };
+}
+
+// entrances: track edges where a train can come from outside the area into it
+function areaEntrances(st) {
+	const halt = stationHalt(currentArea());
+	if (!stationTiles || !halt) return null;
+	const res = [];
+	const reg = (t) => st.signals.some(s => key(s.pos) === key(t.p));
+	for (const k of stationTiles) {
+		const t = tileIndex.get(k);
+		if (!t) continue;
+		for (const d of DIRS) {
+			if (!(t.r & d)) continue;
+			const n = neighbour(t, d);
+			if (!n || stationTiles.has(key(n.p))) continue;
+			// can a train move from n (outside) into t?
+			if (!(n.m & BACK[d])) continue;
+			const ex = explore(t, BACK[d], (x) => x.h === halt);
+			if (!ex.signals.length && !ex.targets.length) continue; // does not lead to the platforms
+			res.push({ from: n, inside: t, dir: BACK[d], ex, registered: ex.signals.filter(reg), unregistered: ex.signals.filter(x => !reg(x)) });
+		}
+	}
+	// depots inside the area are entrances, too
+	for (const k of stationTiles) {
+		const t = tileIndex.get(k);
+		if (!t || !t.d) continue;
+		const ex = explore(t, 0, (x) => x.h === halt && x !== t);
+		if (!ex.signals.length && !ex.targets.length) continue;
+		res.push({ from: t, inside: t, dir: 0, depot: true, ex, registered: ex.signals.filter(reg), unregistered: ex.signals.filter(x => !reg(x)) });
+	}
+	return res;
+}
+
+// exits: for each platform end, the way out of the area
+function areaExits(st) {
+	const halt = stationHalt(currentArea());
+	if (!stationTiles || !halt) return null;
+	const groups = platformGroups(halt);
+	const reg = (t) => st.signals.some(s => key(s.pos) === key(t.p));
+	const res = [];
+	groups.forEach((g, gi) => {
+		const inGroup = new Set(g.map(t => key(t.p)));
+		const deadEnd = g.filter(t => DIRS.some(d => (t.r & d) && neighbour(t, d) && !inGroup.has(key(neighbour(t, d).p)))).length === 1;
+		for (const t of g) {
+			for (const d of DIRS) {
+				if (!(t.r & d)) continue;
+				const n = neighbour(t, d);
+				if (!n || inGroup.has(key(n.p))) continue;
+				const ex = explore(n, d, (x) => !stationTiles.has(key(x.p)) || (x.h && x.h !== halt), (x) => x.h === halt);
+				if (!ex.signals.length && !ex.targets.length) continue; // trains cannot leave this way (one-way)
+				const dep = (st.departures || []).find(x => key(x.pos) === key(t.p));
+				res.push({ group: gi, end: t, dir: d, deadEnd, ex, dep, registered: ex.signals.filter(reg), unregistered: ex.signals.filter(x => !reg(x)) });
+			}
+		}
+	});
+	return res;
 }
 
 // ---------------------------------------------------------------------------
@@ -709,6 +840,7 @@ function renderMap() {
 	const locked = routeStateOfTiles();
 	const preview = new Set();
 	if (hoverRoute) for (const p of hoverRoute.tiles) preview.add(key(p));
+	if (checkPreview) for (const k of checkPreview) preview.add(k);
 	// faint tiles first, so that the visible ones are drawn on top
 	const tiles = tracks.tiles.slice().sort((x, y) => isVisible(x) - isVisible(y));
 
@@ -780,6 +912,18 @@ function renderMap() {
 		grp.appendChild(el("title", {})).textContent = `${t.s.name} (${t.p.join(", ")}) ${layerName(t.p[2])} ${companyName(t.s.o)}` + (interlocked ? " てこ扱い" : "");
 		grp.addEventListener("click", (e) => { e.stopPropagation(); signalClicked(t, interlocked); });
 	}
+	// virtual departure signals: a square at the platform end
+	if (st) for (const d of st.departures || []) {
+		const t = tileIndex.get(key(d.pos));
+		if (!t || !isVisible(t)) continue;
+		const rs = status.routes.filter(r => key(r.start) === key(d.pos));
+		const clear = rs.some(r => r.state !== "idle");
+		const x = cx(t.p), y = cy(t.p), r = 7 * sc;
+		const grp = el("g", {}, g);
+		el("rect", { x: x - r, y: y - r, width: 2 * r, height: 2 * r, rx: 2, fill: clear ? "var(--green)" : "var(--red)", stroke: "#fff", "stroke-width": 2 }, grp);
+		el("text", { x, y: y - 11 * sc, "font-size": Math.max(11, 12 * sc), "font-weight": 700, "text-anchor": "middle", fill: "#fff" }, grp).textContent = signalLabel(st, d.pos);
+		grp.appendChild(el("title", {})).textContent = `仮想出発信号 ${signalLabel(st, d.pos)} (${d.pos.join(", ")})` + (d.train ? " " + d.train : "");
+	}
 	// halt names
 	const named = new Set();
 	for (const t of tiles) {
@@ -810,8 +954,10 @@ function renderRun() {
 	if (!st) { lv.innerHTML = ""; ap.innerHTML = ""; hint.textContent = ""; return; }
 
 	// approach indication: a train holds an interlocked signal at danger
-	const waiting = st.signals.filter(s => s.train && s.aspect === "red");
-	ap.innerHTML = waiting.length ? waiting.map(s => `<div>${signalLabel(st, s.pos)}：${esc(s.train)} 待機中</div>`).join("") : `<span class="hint">待っている列車はありません</span>`;
+	const waiting = st.signals.filter(s => s.train && s.aspect === "red").map(s => `<div>${signalLabel(st, s.pos)}：${esc(s.train)} 待機中</div>`);
+	const leaving = (st.departures || []).filter(d => d.train && d.waiting && !status.routes.some(r => key(r.start) === key(d.pos) && r.state !== "idle"))
+		.map(d => `<div>${signalLabel(st, d.pos)}：${esc(d.train)} 発車待ち</div>`);
+	ap.innerHTML = waiting.concat(leaving).join("") || `<span class="hint">待っている列車はありません</span>`;
 
 	const routes = status.routes.filter(r => r.station === st.id);
 	const groups = new Map();
@@ -824,8 +970,9 @@ function renderRun() {
 	let html = "";
 	for (const [k, rs] of groups) {
 		const s = sig(k);
-		const asp = s ? { green: "進行", red: "停止", yellow: "注意", missing: "なし" }[s.aspect] : "";
-		html += `<div class="group" data-sig="${k}"><div class="group-title">${s ? signalLabel(st, s.pos) : k}　現示：${asp}</div>`;
+		const startPos = rs[0].start;
+		const asp = s ? "現示：" + { green: "進行", red: "停止", yellow: "注意", missing: "なし" }[s.aspect] : isDepartureAnchor(st, startPos) ? "仮想出発信号" : "";
+		html += `<div class="group" data-sig="${k}"><div class="group-title">${signalLabel(st, startPos)}　${asp}</div>`;
 		for (const r of rs) {
 			const busy = [...pending.keys()].some(c => c === "set," + r.id || c === "cancel," + r.id);
 			const chip = busy ? `<span class="chip busy">扱い中…</span>` :
@@ -848,6 +995,54 @@ function renderRun() {
 	}
 	hint.textContent = st.manual ? "てこをクリックすると進路を設定／取消します。進路にマウスを重ねると地図上に表示されます。" :
 		"自動モードです。信号は通常どおり自動で動きます。進路を扱うには上の「扱者」に切り替えてください。";
+}
+
+let checkPreview = null; // tiles highlighted while hovering a check row
+function renderChecks(st) {
+	const el1 = document.getElementById("entryList"), el2 = document.getElementById("exitList");
+	if (!st) { el1.innerHTML = el2.innerHTML = `<span class="hint">先に連動駅を作成してください</span>`; el1.dataset.html = el2.dataset.html = ""; return; }
+	const ents = areaEntrances(st), exs = areaExits(st);
+	if (!ents) { el1.innerHTML = el2.innerHTML = `<span class="hint">駅のホームが表示範囲に見つかりません。「駅に合わせる」を押してください。</span>`; el1.dataset.html = el2.dataset.html = ""; return; }
+	const pos = (t) => `(${t.p[0]}, ${t.p[1]})`;
+	const sigBtn = (t, on) => `<button data-sigtoggle="${key(t.p)}">${on ? "解除" : "登録"}：信号 ${pos(t)}</button>`;
+	let i = 0;
+	const html1 = ents.map(e => {
+		i++;
+		const title = e.depot ? `入口${i}（車庫 ${pos(e.from)}）` : `入口${i}（${dirName(BACK[e.dir])}側 ${pos(e.from)}）`;
+		let cls, msg, acts = "";
+		if (e.ex.targets.length) { cls = "warn"; msg = "⚠ 信号を通らずにホームへ入れます。ゲーム内で、この線路に駅へ向かう信号を置いてください。"; }
+		else if (e.unregistered.length && !e.registered.length) { cls = "warn"; msg = "⚠ 入口の信号が未登録です。"; acts = e.unregistered.map(t => sigBtn(t, false)).join(""); }
+		else { cls = "ok"; msg = "✔ " + e.registered.map(t => signalLabel(st, t.p)).join("・") + " で管理しています"; acts = e.registered.map(t => sigBtn(t, true)).join(""); }
+		return `<div class="check ${cls}" data-prev="${e.ex.tiles.join(";")}"><div class="head"><b>${title}</b></div><div class="msg">${msg}</div><div class="acts">${acts}</div></div>`;
+	}).join("") || `<span class="hint">外から入ってくる線路は見つかりませんでした。</span>`;
+
+	const html2 = exs.map(x => {
+		const title = `${x.group + 1}番線 ${dirName(x.dir)}側` + (x.deadEnd ? `<span class="tag">行き止まり</span>` : "");
+		let cls, msg, acts = "";
+		const depBtn = x.dep ? `<button data-depdel="${key(x.end.p)}">仮想出発信号を解除</button>` : `<button data-depadd="${key(x.end.p)}">仮想出発信号にする</button>`;
+		if (x.dep) { cls = "ok"; msg = `✔ 仮想出発信号（${signalLabel(st, x.end.p)}）で管理しています`; acts = depBtn; }
+		else if (x.registered.length) { cls = "ok"; msg = "✔ 出発信号 " + x.registered.map(t => signalLabel(st, t.p)).join("・") + " で管理しています"; acts = x.registered.map(t => sigBtn(t, true)).join(""); }
+		else if (x.unregistered.length && !x.ex.targets.length) { cls = "warn"; msg = "⚠ 出発信号が未登録です。信号を登録するか、仮想出発信号にしてください。"; acts = x.unregistered.map(t => sigBtn(t, false)).join("") + depBtn; }
+		else { cls = "warn"; msg = "⚠ 出発信号がありません。仮想出発信号にしてください。"; acts = depBtn; }
+		return `<div class="check ${cls}" data-prev="${x.ex.tiles.concat([key(x.end.p)]).join(";")}"><div class="head"><b>${title}</b></div><div class="msg">${msg}</div><div class="acts">${acts}</div></div>`;
+	}).join("") || `<span class="hint">番線が見つかりませんでした。</span>`;
+
+	if (el1.dataset.html === html1 && el2.dataset.html === html2) return;
+	el1.innerHTML = el1.dataset.html = html1;
+	el2.innerHTML = el2.dataset.html = html2;
+	checkPreview = null;
+	for (const c of document.querySelectorAll("#entryList .check, #exitList .check")) {
+		c.addEventListener("mouseenter", () => { checkPreview = new Set(c.dataset.prev.split(";")); renderMap(); });
+		c.addEventListener("mouseleave", () => { checkPreview = null; renderMap(); });
+	}
+	for (const b of document.querySelectorAll("[data-sigtoggle]")) b.addEventListener("click", () => {
+		const t = tileIndex.get(b.dataset.sigtoggle);
+		toggleSignal(t, st.signals.some(s => key(s.pos) === b.dataset.sigtoggle));
+	});
+	for (const b of document.querySelectorAll("[data-depadd]")) b.addEventListener("click", () =>
+		command(`dep_add,${st.id},${b.dataset.depadd}`, "仮想出発信号の登録 (" + b.dataset.depadd + ")"));
+	for (const b of document.querySelectorAll("[data-depdel]")) b.addEventListener("click", () =>
+		command(`dep_del,${st.id},${b.dataset.depdel}`, "仮想出発信号の解除 (" + b.dataset.depdel + ")"));
 }
 
 function renderSetup() {
@@ -877,6 +1072,7 @@ function renderSetup() {
 		const inp = document.getElementById(id);
 		if (document.activeElement !== inp) inp.value = v ?? "";
 	}
+	renderChecks(st);
 	// signals in the area
 	const sl = document.getElementById("sigList");
 	const sortMode = document.getElementById("sigSort").value;
@@ -997,13 +1193,23 @@ async function autoRoutes() {
 	groups.forEach((g, i) => g.forEach(t => groupOf.set(key(t.p), i)));
 	const todo = [];
 
-	for (const s of st.signals) {
-		const t = tileIndex.get(key(s.pos));
-		if (!t) continue;
-		const reach = travel(t);
+	const starts = st.signals.map(s => ({ pos: s.pos, dep: false })).concat((st.departures || []).map(d => ({ pos: d.pos, dep: true })));
+	for (const s of starts) {
+		const anchor = tileIndex.get(key(s.pos));
+		if (!anchor) continue;
+		let t = anchor, reach;
+		if (s.dep) {
+			// virtual departure: leave the platform over the anchor end only
+			const g = groups[groupOf.get(key(anchor.p))] || [anchor];
+			const inG = new Set(g.map(x => key(x.p)));
+			const dOut = DIRS.find(d => (anchor.r & d) && neighbour(anchor, d) && !inG.has(key(neighbour(anchor, d).p)));
+			if (!dOut) continue;
+			reach = travel(anchor, 400, dOut); // as if the train came from the platform, moving outwards
+		}
+		else reach = travel(t);
 		const startGroup = groupOf.get(key(t.p));
 		let toPlatform = 0;
-		groups.forEach((g, i) => {
+		if (!s.dep) groups.forEach((g, i) => {
 			if (i === startGroup) return;
 			// the far end of the platform seen from the signal
 			let best = null;
@@ -1020,12 +1226,12 @@ async function autoRoutes() {
 			toPlatform++;
 			todo.push({ start: s.pos, end: best.t.p, name: `${signalLabel(st, s.pos)}→${i + 1}番線` });
 		});
-		if (toPlatform === 0) {
+		if (toPlatform === 0 || s.dep) {
 			// departure signal: routes to the exits of the area (next signal or edge of the area)
 			let k = 0;
 			for (const [, n] of reach) {
 				if (n.t === t) continue;
-				if (groupOf.has(key(n.t.p)) && groupOf.get(key(n.t.p)) !== startGroup) continue;
+				if (groupOf.has(key(n.t.p))) continue;
 				if (!inside(n.t)) continue;
 				const atSignal = n.t.s && n.dist > 0;
 				const atEdge = DIRS.some(d => (n.t.m & d) && !(n.dir && d === BACK[n.dir]) && !inside(neighbour(n.t, d)));

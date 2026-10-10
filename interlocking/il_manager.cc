@@ -25,7 +25,8 @@
 
 
 // version of the interlocking data block in the savegame (independent of the OTRP version)
-#define IL_SAVE_VERSION 1
+// 1: stations, signals, routes  2: + virtual departure signals
+#define IL_SAVE_VERSION 2
 
 // maximum number of tiles searched when defining a route
 #define IL_MAX_SEARCH_NODES 4096
@@ -120,6 +121,102 @@ il_station_t *interlocking_manager_t::find_station_of_signal(koord3d pos) const
 		if(  st->signals.is_contained(pos)  ) {
 			return st;
 		}
+	}
+	return NULL;
+}
+
+
+il_station_t *interlocking_manager_t::find_departure_anchor(koord3d pos, il_departure_t **dep) const
+{
+	FOR(vector_tpl<il_station_t *>, st, stations) {
+		FOR(vector_tpl<il_departure_t *>, d, st->departures) {
+			if(  d->anchor == pos  ) {
+				if(  dep  ) *dep = d;
+				return st;
+			}
+		}
+	}
+	return NULL;
+}
+
+
+il_station_t *interlocking_manager_t::find_departure_track(koord3d pos, il_departure_t **dep) const
+{
+	FOR(vector_tpl<il_station_t *>, st, stations) {
+		FOR(vector_tpl<il_departure_t *>, d, st->departures) {
+			if(  d->tiles.is_contained(pos)  ) {
+				if(  dep  ) *dep = d;
+				return st;
+			}
+		}
+	}
+	return NULL;
+}
+
+
+bool interlocking_manager_t::is_start_point(const il_station_t *st, koord3d pos) const
+{
+	if(  st->signals.is_contained(pos)  ) {
+		return true;
+	}
+	FOR(vector_tpl<il_departure_t *>, d, st->departures) {
+		if(  d->anchor == pos  ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+const char *interlocking_manager_t::platform_track(koord3d pos, vector_tpl<koord3d> &tiles, koord3d &anchor)
+{
+	tiles.clear();
+	grund_t *gr = world()->lookup(pos);
+	if(  gr == NULL  ||  gr->get_weg(track_wt) == NULL  ) {
+		return "no track at this position";
+	}
+	const halthandle_t halt = gr->get_halt();
+	if(  !halt.is_bound()  ) {
+		return "not a platform";
+	}
+	// all tiles of the same stop connected along this track
+	vector_tpl<grund_t *> todo;
+	todo.append(gr);
+	tiles.append(pos);
+	vector_tpl<koord3d> ends;
+	for(  uint32 i = 0;  i < todo.get_count()  &&  tiles.get_count() < 256;  i++  ) {
+		grund_t *g = todo[i];
+		const ribi_t::ribi r = g->get_weg(track_wt)->get_ribi_unmasked();
+		bool is_end = false;
+		for(  int d = 0;  d < 4;  d++  ) {
+			grund_t *to = NULL;
+			if(  (r & ribi_t::nesw[d])  &&  g->get_neighbour(to, track_wt, ribi_t::nesw[d])  ) {
+				if(  to->get_halt() == halt  ) {
+					if(  !tiles.is_contained(to->get_pos())  ) {
+						tiles.append(to->get_pos());
+						todo.append(to);
+					}
+				}
+				else {
+					is_end = true; // the track goes on outside the platform
+				}
+			}
+		}
+		if(  is_end  ) {
+			ends.append(g->get_pos());
+		}
+	}
+	if(  ends.empty()  ) {
+		return "the platform track is not connected";
+	}
+	if(  ends.is_contained(pos)  ) {
+		anchor = pos;
+	}
+	else if(  ends.get_count() == 1  ) {
+		anchor = ends[0];
+	}
+	else {
+		return "click the platform end where trains leave";
 	}
 	return NULL;
 }
@@ -387,6 +484,40 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 			}
 		}
 	}
+	else if(  (strcmp(cmd, "dep_add") == 0  ||  strcmp(cmd, "dep_del") == 0)  &&  n >= 5  ) {
+		il_station_t *st = find_station((uint16)atoi(f[1]));
+		const koord3d pos((sint16)atoi(f[2]), (sint16)atoi(f[3]), (sint8)atoi(f[4]));
+		il_departure_t *existing = NULL;
+		il_station_t *owner_st = find_departure_track(pos, &existing);
+		if(  st == NULL  ) {
+			error = "unknown station";
+		}
+		else if(  !may_operate(st, player)  ) {
+			error = "not owner";
+		}
+		else if(  cmd[4] == 'a'  ) {
+			il_departure_t *d = new il_departure_t();
+			if(  owner_st  ) {
+				error = owner_st == st ? "platform already registered" : "platform belongs to another station";
+				delete d;
+			}
+			else if(  (error = platform_track(pos, d->tiles, d->anchor)) != NULL  ) {
+				delete d;
+			}
+			else {
+				st->departures.append(d);
+			}
+		}
+		else {
+			if(  owner_st != st  ||  existing == NULL  ) {
+				error = "platform not registered";
+			}
+			else {
+				st->departures.remove(existing);
+				delete existing;
+			}
+		}
+	}
 	else if(  strcmp(cmd, "rt_def") == 0  &&  n >= 8  ) {
 		il_station_t *st = find_station((uint16)atoi(f[1]));
 		const koord3d start((sint16)atoi(f[2]), (sint16)atoi(f[3]), (sint8)atoi(f[4]));
@@ -398,7 +529,7 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 		else if(  !may_operate(st, player)  ) {
 			error = "not owner";
 		}
-		else if(  !st->signals.is_contained(start)  ) {
+		else if(  !is_start_point(st, start)  ) {
 			error = "start is not a registered signal of this station";
 		}
 		else if(  start == end  ) {
@@ -503,7 +634,7 @@ const char *interlocking_manager_t::cmd_set(il_route_t *r)
 			return "track is occupied";
 		}
 	}
-	if(  get_signal(r->tiles[0]) == NULL  ) {
+	if(  get_signal(r->tiles[0]) == NULL  &&  find_departure_anchor(r->tiles[0]) == NULL  ) {
 		return "start signal is missing";
 	}
 	set_route_state(r, IL_SET);
@@ -626,20 +757,31 @@ bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sin
 		return true;
 	}
 
-	if(  r->state == IL_SET  ) {
+	if(  r->state == IL_SET  &&  !cnv->is_waiting()  &&  !call_by_step  ) {
 		// like the choose signal (OTRP v51+): the route search may only run in a step,
 		// not in a sync_step. Stop at the signal and let the convoy check again in its step.
-		if(  !cnv->is_waiting()  &&  !call_by_step  ) {
-			cnv->request_signal_check_in_step();
-			sig->set_state(roadsign_t::STATE_RED);
-			restart_speed = -1;
-			result = false;
-			return true;
-		}
+		cnv->request_signal_check_in_step();
+		sig->set_state(roadsign_t::STATE_RED);
+		restart_speed = -1;
+		result = false;
+		return true;
+	}
+	if(  r->state == IL_SET  ) {
 		cnv->set_signal_check_in_step_request_invalid();
+	}
+	result = admit_train(v, next_block, r, restart_speed, next_block + 1);
+	sig->set_state(result ? roadsign_t::STATE_GREEN : roadsign_t::STATE_RED);
+	return true;
+}
+
+
+bool interlocking_manager_t::admit_train(rail_vehicle_t *v, uint16 start, il_route_t *r, sint32 &restart_speed, uint16 reserve_from)
+{
+	convoi_t *cnv = v->get_convoi();
+	if(  r->state == IL_SET  ) {
 		vector_tpl<koord3d> tiles;
-		if(  !build_train_route(v, next_block, r, tiles)  ) {
-			// report only once per route and train (the train checks the signal again and again)
+		if(  !build_train_route(v, start, r, tiles)  ) {
+			// report only once per route and train (the train checks again and again)
 			const uint32 key = ((uint32)r->id << 16) | cnv->self.get_id();
 			if(  key != last_wrong_route  ) {
 				last_wrong_route = key;
@@ -649,10 +791,8 @@ bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sin
 				ev.append("}");
 				push_event(ev);
 			}
-			sig->set_state(roadsign_t::STATE_RED);
 			restart_speed = 0;
-			result = false;
-			return true;
+			return false;
 		}
 		route_t target_rt;
 		FOR(vector_tpl<koord3d>, const &t, tiles) {
@@ -661,25 +801,68 @@ bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sin
 		// same as the choose signal: replace the route of the train (and of coupled trains)
 		convoihandle_t c = cnv->self;
 		while(  c.is_bound()  ) {
-			c->access_route()->remove_koord_from(next_block);
+			c->access_route()->remove_koord_from(start);
 			c->access_route()->append(&target_rt);
 			c = c->get_coupling_convoi();
 		}
 	}
 
 	uint16 next_signal, next_crossing;
-	if(  v->block_reserver(cnv->get_route(), next_block + 1, next_signal, next_crossing, 0, true, false)  ) {
-		sig->set_state(roadsign_t::STATE_GREEN);
+	if(  v->block_reserver(cnv->get_route(), reserve_from, next_signal, next_crossing, 0, true, false)  ) {
 		cnv->set_next_stop_index(min(next_crossing, next_signal));
 		r->convoy = cnv->self;
 		set_route_state(r, IL_OCCUPIED);
-		result = true;
 		return true;
 	}
-
-	sig->set_state(roadsign_t::STATE_RED);
 	restart_speed = 0;
-	result = false;
+	return false;
+}
+
+
+bool interlocking_manager_t::on_departure(rail_vehicle_t *v, sint32 &restart_speed, bool &result)
+{
+	convoi_t *cnv = v->get_convoi();
+	if(  cnv == NULL  ) {
+		return false;
+	}
+	il_departure_t *dep = NULL;
+	il_station_t *st = find_departure_track(v->get_pos(), &dep);
+	if(  st == NULL  ||  !st->manual  ) {
+		return false;
+	}
+	// the train must leave over the anchor (the platform end with the departure routes)
+	const route_t *rt = cnv->get_route();
+	const uint16 from = max(v->get_route_index(), (uint16)1) - 1;
+	uint16 k = route_t::INVALID_INDEX;
+	for(  uint32 i = from;  i < rt->get_count();  i++  ) {
+		if(  rt->at(i) == dep->anchor  ) {
+			k = (uint16)i;
+			break;
+		}
+	}
+	if(  k == route_t::INVALID_INDEX  ) {
+		// leaves the other way (not over the controlled end)
+		return false;
+	}
+
+	il_route_t *r = NULL;
+	FOR(vector_tpl<il_route_t *>, rr, routes) {
+		if(  rr->tiles[0] == dep->anchor  &&  (rr->state == IL_SET  ||  (rr->state == IL_OCCUPIED  &&  rr->convoy == cnv->self))  ) {
+			r = rr;
+			break;
+		}
+	}
+	if(  r == NULL  ) {
+		// no departure route: the train waits at the platform
+		restart_speed = 0;
+		result = false;
+		return true;
+	}
+	if(  r->state == IL_OCCUPIED  ) {
+		// already admitted: the core reserves as usual
+		return false;
+	}
+	result = admit_train(v, k, r, restart_speed, from);
 	return true;
 }
 
@@ -751,6 +934,18 @@ void interlocking_manager_t::rdwr(loadsave_t *file)
 		file->rdwr_byte(st->owner);
 		file->rdwr_bool(st->manual);
 		rdwr_pos_vector(file, st->signals);
+		if(  version >= 2  ) {
+			uint32 dcount = st->departures.get_count();
+			file->rdwr_long(dcount);
+			for(  uint32 j = 0;  j < dcount;  j++  ) {
+				il_departure_t *d = file->is_loading() ? new il_departure_t() : st->departures[j];
+				d->anchor.rdwr(file);
+				rdwr_pos_vector(file, d->tiles);
+				if(  file->is_loading()  ) {
+					st->departures.append(d);
+				}
+			}
+		}
 		if(  file->is_loading()  ) {
 			stations.append(st);
 		}
@@ -782,6 +977,12 @@ void interlocking_manager_t::rotate90(sint16 y_size)
 	FOR(vector_tpl<il_station_t *>, st, stations) {
 		for(  uint32 i = 0;  i < st->signals.get_count();  i++  ) {
 			st->signals[i].rotate90(y_size);
+		}
+		FOR(vector_tpl<il_departure_t *>, d, st->departures) {
+			d->anchor.rotate90(y_size);
+			for(  uint32 i = 0;  i < d->tiles.get_count();  i++  ) {
+				d->tiles[i].rotate90(y_size);
+			}
 		}
 	}
 	FOR(vector_tpl<il_route_t *>, r, routes) {
@@ -820,6 +1021,31 @@ void interlocking_manager_t::get_status_json(cbuffer_t &buf) const
 			if(  holder.is_bound()  ) {
 				buf.append(",\"train\":");
 				append_json_string(buf, holder->get_name());
+			}
+			buf.append("}");
+		}
+		// virtual departure signals: the train standing on the platform track
+		buf.append("],\"departures\":[");
+		for(  uint32 i = 0;  i < st->departures.get_count();  i++  ) {
+			const il_departure_t *d = st->departures[i];
+			buf.append(i ? "," : "");
+			buf.append("{\"pos\":");
+			append_json_pos(buf, d->anchor);
+			buf.append(",\"tiles\":[");
+			convoihandle_t holder;
+			for(  uint32 j = 0;  j < d->tiles.get_count();  j++  ) {
+				buf.append(j ? "," : "");
+				append_json_pos(buf, d->tiles[j]);
+				const schiene_t *sch = get_rail(d->tiles[j]);
+				if(  !holder.is_bound()  &&  sch  ) {
+					holder = sch->get_reserved_convoi();
+				}
+			}
+			buf.append("]");
+			if(  holder.is_bound()  ) {
+				buf.append(",\"train\":");
+				append_json_string(buf, holder->get_name());
+				buf.printf(",\"waiting\":%s", holder->is_waiting() ? "true" : "false");
 			}
 			buf.append("}");
 		}

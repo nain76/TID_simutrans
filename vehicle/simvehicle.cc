@@ -5319,6 +5319,9 @@ bool rail_vehicle_t::can_enter_tile(const grund_t *gr, sint32 &restart_speed, ui
 					}
 				}
 
+#ifdef TID_INTERLOCKING // TID_IL H8: virtual departure signal of the interlocking panel
+				{ bool il_result; if(  interlocking_hook_departure( this, restart_speed, il_result )  ) { return il_result; } }
+#endif
 				if (!(w->has_signal()  ||  gr_current->get_crossing())) {
 					// free track => reserve up to next signal
 					if(  cnv->is_drive_without_reservation()  ) {

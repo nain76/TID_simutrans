@@ -36,6 +36,16 @@ struct il_route_t {
 	convoihandle_t convoy;
 };
 
+/**
+ * Virtual departure signal: a platform track whose trains may only depart when a route
+ * from it is set (for platforms without a real departure signal, e.g. dead-end platforms).
+ * There is no object on the map, so the automatic mode is not affected at all.
+ */
+struct il_departure_t {
+	koord3d anchor;               ///< platform end where trains leave; start tile of its routes
+	vector_tpl<koord3d> tiles;    ///< all tiles of this platform track
+};
+
 /// one interlocked station (the unit of one panel)
 struct il_station_t {
 	uint16 id;
@@ -44,6 +54,10 @@ struct il_station_t {
 	bool manual;   ///< false = automatic mode (signals work as usual), true = operator mode
 	/// signals controlled by this station (positions of signal_t)
 	vector_tpl<koord3d> signals;
+	/// virtual departure signals
+	vector_tpl<il_departure_t *> departures;
+
+	~il_station_t() { clear_ptr_vector(departures); }
 };
 
 /**
@@ -68,6 +82,9 @@ public:
 
 	/// see interlocking_hook_signal()
 	bool on_signal(rail_vehicle_t *v, uint16 next_block, sint32 &restart_speed, bool call_by_step, bool &result);
+
+	/// see interlocking_hook_departure()
+	bool on_departure(rail_vehicle_t *v, sint32 &restart_speed, bool &result);
 
 	void step();
 
@@ -105,12 +122,22 @@ private:
 	il_station_t *find_station(uint16 id) const;
 	il_route_t *find_route(uint16 id) const;
 	il_station_t *find_station_of_signal(koord3d pos) const;
+	/// the station and departure whose anchor is pos (NULL if none)
+	il_station_t *find_departure_anchor(koord3d pos, il_departure_t **dep = NULL) const;
+	/// the station and departure that contains the platform tile pos (NULL if none)
+	il_station_t *find_departure_track(koord3d pos, il_departure_t **dep = NULL) const;
+	/// a registered start point of routes: interlocked signal or virtual departure signal
+	bool is_start_point(const il_station_t *st, koord3d pos) const;
+	/// tiles of the platform track at pos, and the end where trains leave
+	static const char *platform_track(koord3d pos, vector_tpl<koord3d> &tiles, koord3d &anchor);
 	bool may_operate(const il_station_t *st, const player_t *player) const;
 
 	void set_route_state(il_route_t *r, uint8 state);
 	void push_event(const char *json);
 
 	const char *cmd_set(il_route_t *r);
+	/// replaces the route of the train from index start on and reserves it (shared by signals and departures)
+	bool admit_train(rail_vehicle_t *v, uint16 start, il_route_t *r, sint32 &restart_speed, uint16 reserve_from);
 	const char *cmd_cancel(il_route_t *r);
 
 	/// breadth first search along the track from the start signal to the end tile

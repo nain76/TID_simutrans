@@ -50,6 +50,18 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 #endif
 ```
 
+### H8 発車 — `vehicle/simvehicle.cc`
+
+- 役割: 仮想出発信号（ホームに信号を置かない番線の出発管理）。発車しようとする列車を、出発進路が引かれるまでホームで待たせる。
+- 場所: `rail_vehicle_t::can_enter_tile()` の中、`CAN_START` の分岐で、同じタイルの他の車両を調べるループの**後**、
+  `if (!(w->has_signal()  ||  gr_current->get_crossing()))` の**前**。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H8: virtual departure signal of the interlocking panel
+				{ bool il_result; if(  interlocking_hook_departure( this, restart_speed, il_result )  ) { return il_result; } }
+#endif
+```
+
 ### H2 ステップ処理 — `simworld.cc`
 
 - 役割: 列車が通過した進路を自動で解除する（全クライアントで同じ順に実行される場所であること）。

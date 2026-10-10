@@ -19,6 +19,7 @@ need() { # need <file> <pattern> <count> <description>
 echo "hooks in the core (// TID_IL):"
 need vehicle/simvehicle.cc 'interlocking/interlocking.h" // TID_IL' 1 "H1 include in vehicle/simvehicle.cc"
 need vehicle/simvehicle.cc 'TID_IL H1' 1 "H1 signal hook in rail_vehicle_t::is_signal_clear()"
+need vehicle/simvehicle.cc 'TID_IL H8' 1 "H8 departure hook in rail_vehicle_t::can_enter_tile() (CAN_START)"
 need simworld.cc 'interlocking/interlocking.h" // TID_IL' 1 "include in simworld.cc"
 need simworld.cc 'TID_IL H2' 1 "H2 karte_t::step()"
 need simworld.cc 'TID_IL H3' 3 "H3 save / load / load finished"

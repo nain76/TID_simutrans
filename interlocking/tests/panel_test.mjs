@@ -90,7 +90,7 @@ try {
 	await page.click("#btnNewStation");
 	await waitFor(async () => (await getJson("/api/status")).stations.length === 1, 15000, "station created");
 	check(true, `station "${haltA.name}" created`);
-	await page.waitForSelector("#sigList button");
+	await page.waitForSelector("#entryList .check");
 	// height filter: the bridge line at x=10 (height 1) crosses the station but is not connected
 	await page.waitForSelector("#viewbar button[data-z]");
 	const layerNames = await page.$$eval("#viewbar button[data-z]", bs => bs.map(b => b.textContent));
@@ -113,11 +113,27 @@ try {
 	check(await page.evaluate(() => CELL) === cell0, "zoom back to 100%");
 	const ownerOpts = await page.$$eval("#ownerSel option", os => os.map(o => o.textContent));
 	check(ownerOpts.length >= 2 && ownerOpts[0].startsWith("すべての会社"), "company filter: " + ownerOpts.join(" / "));
-	check(await page.$("#sigList .owner") !== null, "signal list grouped by company: " + await page.textContent("#sigList .owner"));
-	const sigItem = page.locator("#sigList .item", { hasText: "(3, 5, 0)" });
-	await sigItem.locator("button").click();
+	check(await page.$("#sigList .owner") !== null, "signal list (other signals) grouped by company: " + await page.textContent("#sigList .owner"));
+	// entrances: west (S1, not yet registered) and east (from B, no signal at all)
+	await page.waitForSelector("#entryList .check");
+	const entries = await page.$$eval("#entryList .check", cs => cs.map(c => c.textContent));
+	check(entries.some(t => t.includes("未登録") && t.includes("(3, 5)")), "entrance with S1 shown as not registered");
+	check(entries.some(t => t.includes("信号を通らずに")), "entrance without any signal is warned");
+	await page.locator("#entryList button", { hasText: "(3, 5)" }).click();
 	await waitFor(async () => (await getJson("/api/status")).stations[0].signals.length === 1, 15000, "signal registered");
-	check(true, "S1 registered by the panel");
+	await page.waitForFunction(() => [...document.querySelectorAll("#entryList .check.ok")].some(c => c.textContent.includes("S1")), null, { timeout: 15000 });
+	check(true, "S1 registered from the entrance list, entrance shows ✔");
+	// exits: a platform end without departure signal -> virtual departure signal
+	const exitRows = await page.$$eval("#exitList .check", cs => cs.map(c => c.textContent));
+	check(exitRows.length >= 2 && exitRows.every(t => t.includes("番線")), "exit rows per platform end: " + exitRows.length);
+	await page.locator("#exitList button", { hasText: "仮想出発信号にする" }).first().click();
+	await waitFor(async () => (await getJson("/api/status")).stations[0].departures.length === 1, 15000, "virtual departure registered");
+	await page.waitForFunction(() => [...document.querySelectorAll("#exitList .check.ok")].some(c => c.textContent.includes("仮想出発信号")), null, { timeout: 15000 });
+	check(true, "virtual departure signal registered from the exit list");
+	await page.screenshot({ path: path.join(shots, "1a_checks.png") });
+	await page.locator("#exitList button", { hasText: "仮想出発信号を解除" }).first().click();
+	await waitFor(async () => (await getJson("/api/status")).stations[0].departures.length === 0, 15000, "virtual departure removed");
+	check(true, "virtual departure signal removed again");
 	await page.click("#btnAutoRoutes");
 	const routes = await waitFor(async () => { const r = (await getJson("/api/status")).routes; return r.length >= 2 ? r : null; }, 30000, "routes")
 		.catch(async (e) => { console.log("  toast:", await page.textContent("#toast"), "\n  log:", await page.textContent("#log")); throw e; });

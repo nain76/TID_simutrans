@@ -389,6 +389,7 @@ OTRP 本体が更新されたときに、この機能を**新しい OTRP にす�
 | ID | ファイル | 場所 | 変更量 | 内容 |
 |---|---|---|---|---|
 | H1 | `vehicle/simvehicle.cc` | `rail_vehicle_t::is_signal_clear()` の先頭 | 3 行 | てこ扱い信号ならマネージャに判定を任せる |
+| H8 | `vehicle/simvehicle.cc` | `rail_vehicle_t::can_enter_tile()` の発車（`CAN_START`）分岐 | 3 行 | 仮想出発信号（ホームに信号を置かない番線の出発管理） |
 | H2 | `simworld.cc` | `karte_t::step()` | 1 行 | 進路の自動解除（進路区分鎖錠）、状態変化の検出 |
 | H3 | `simworld.cc` | セーブ／ロード処理の末尾 | 2 行 | 追記ブロックの書き込み／読み込み |
 | H4 | `simworld.cc` | `rotate90()`、マップの破棄・新規作成 | 2 行 | 座標の回転、状態のクリア |

@@ -32,6 +32,12 @@ bool interlocking_hook_signal(rail_vehicle_t *v, uint16 next_block, sint32 &rest
 }
 
 
+bool interlocking_hook_departure(rail_vehicle_t *v, sint32 &restart_speed, bool &result)
+{
+	return interlocking_manager_t::get()->on_departure(v, restart_speed, result);
+}
+
+
 void interlocking_hook_step()
 {
 	interlocking_manager_t::get()->step();
