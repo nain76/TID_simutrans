@@ -85,7 +85,7 @@ void il_query::get_tracks_json(cbuffer_t &buf, koord p1, koord p2)
 					convoys.append_unique(c);
 				}
 				if(  signal_t *sig = gr->find<signal_t>()  ) {
-					buf.printf(",\"s\":{\"dir\":%u,\"aspect\":\"%s\",\"name\":", (unsigned)sig->get_dir(), aspect_name(sig));
+					buf.printf(",\"s\":{\"dir\":%u,\"aspect\":\"%s\",\"o\":%d,\"name\":", (unsigned)sig->get_dir(), aspect_name(sig), sig->get_owner_nr());
 					append_json_string(buf, sig->get_desc()->get_name());
 					buf.append("}");
 				}

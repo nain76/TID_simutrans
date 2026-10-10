@@ -13,6 +13,7 @@
 #include "il_bridge.h"
 #include "il_manager.h"
 #include "il_query.h"
+#include "il_json.h"
 #include "il_tool.h"
 
 #include "../simdebug.h"
@@ -590,9 +591,20 @@ static void handle_http(client_t &c, char *head, const char *body)
 	}
 	else if(  strcmp(target, "/api/info") == 0  ) {
 		karte_t *welt = world();
-		json.printf("{\"type\":\"info\",\"protocol\":2,\"map\":[%d,%d],\"player\":%d}",
+		json.printf("{\"type\":\"info\",\"protocol\":2,\"map\":[%d,%d],\"player\":%d,\"players\":[",
 			welt ? welt->get_size().x : 0, welt ? welt->get_size().y : 0,
 			welt  &&  welt->get_active_player() ? welt->get_active_player()->get_player_nr() : -1);
+		// company names, for sorting stations and signals by company in the panel
+		bool first = true;
+		for(  uint8 i = 0;  welt  &&  i < MAX_PLAYER_COUNT;  i++  ) {
+			if(  player_t *pl = welt->get_player(i)  ) {
+				json.printf("%s{\"nr\":%d,\"name\":", first ? "" : ",", i);
+				append_json_string(json, pl->get_name());
+				json.append("}");
+				first = false;
+			}
+		}
+		json.append("]}");
 	}
 	else if(  strncmp(target, "/api/", 5) == 0  ) {
 		send_http_error(c, 404, "not found");

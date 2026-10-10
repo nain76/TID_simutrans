@@ -103,6 +103,17 @@ try {
 	check(await page.evaluate(() => !isVisible(tileIndex.get("10,5,1")) && isVisible(tileIndex.get("10,5,0"))), "height 1 hidden by its button");
 	await page.click("#viewbar button[data-z='1']");
 	await page.click("#viewbar button[data-v=connected]");
+	// zoom and company sorting
+	const cell0 = await page.evaluate(() => CELL);
+	await page.click("#viewbar button[data-zoom=in]");
+	await page.click("#viewbar button[data-zoom=in]");
+	const cell1 = await page.evaluate(() => CELL);
+	check(cell1 > cell0 * 1.4, `zoom in: tile ${cell0}px -> ${cell1}px`);
+	await page.click("#viewbar button[data-zoom=fit]");
+	check(await page.evaluate(() => CELL) === cell0, "zoom back to 100%");
+	const ownerOpts = await page.$$eval("#ownerSel option", os => os.map(o => o.textContent));
+	check(ownerOpts.length >= 2 && ownerOpts[0].startsWith("すべての会社"), "company filter: " + ownerOpts.join(" / "));
+	check(await page.$("#sigList .owner") !== null, "signal list grouped by company: " + await page.textContent("#sigList .owner"));
 	const sigItem = page.locator("#sigList .item", { hasText: "(3, 5, 0)" });
 	await sigItem.locator("button").click();
 	await waitFor(async () => (await getJson("/api/status")).stations[0].signals.length === 1, 15000, "signal registered");
