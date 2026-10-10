@@ -11,6 +11,7 @@
 #include "components/gui_divider.h"
 #include "load_relief_frame.h"
 #include "messagebox.h"
+#include "climates.h"
 
 #include "../simdebug.h"
 #include "../simworld.h"
@@ -172,6 +173,12 @@ enlarge_map_frame_t::enlarge_map_frame_t() :
 	load_map.init(button_t::roundbox | button_t::flexible, "load map");
 	load_map.add_listener( this );
 	add_component( &load_map );
+	// Landscape settings button
+	open_climate_gui.init(button_t::roundbox | button_t::flexible,"Climate Control");
+	open_climate_gui.pressed = win_get_magic( magic_climate );
+	open_climate_gui.add_listener( this );
+	add_component( &open_climate_gui );
+
 	// start game
 	start_button.init( button_t::roundbox | button_t::flexible, "enlarge map");
 	start_button.add_listener( this );
@@ -222,6 +229,18 @@ bool enlarge_map_frame_t::action_triggered( gui_action_creator_t *comp,value_t v
 			welt->enlarge_map(sets, NULL);
 		}
 	}
+	else if(comp==&open_climate_gui) {
+		gui_frame_t *climate_gui = win_get_magic( magic_climate );
+		if(  climate_gui  ) {
+			destroy_win( climate_gui );
+			open_climate_gui.pressed = false;
+		}
+		else {
+			climate_gui_t *cg = new climate_gui_t(sets);
+			create_win((display_get_width() - cg->get_windowsize().w-10), 40, cg, w_info, magic_climate );
+			open_climate_gui.pressed = true;
+		}
+	}
 	else if(comp==&load_map) {
 		if(!loaded_heightfield){
 			inp_x_size.disable();
@@ -229,7 +248,7 @@ bool enlarge_map_frame_t::action_triggered( gui_action_creator_t *comp,value_t v
 			sets->heightfield = "";
 			load_relief_frame_t* lrf = new load_relief_frame_t(sets);
 			create_win(lrf, w_info, magic_load_t );
-			win_set_pos(lrf, (display_get_width() - lrf->get_windowsize().w-10), env_t::iconsize.h);
+			win_set_pos(lrf, (display_get_width() - lrf->get_windowsize().w-10), env_t::iconsize.h + get_main_menu_scrollbar_extra());
 			loaded_heightfield = true;
 		} else {
 			inp_x_size.enable();

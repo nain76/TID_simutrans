@@ -1,4 +1,4 @@
-# TID 連動盤（外部信号制御盤）— 試作
+# TID 連動盤（外部信号制御盤）— 試作（OTRP v62.0.3 ベース）
 
 外部の盤（Web 盤・物理盤など）から、駅の信号と進路（番線の選択）を扱うための機能。
 設計は `documentation/interlocking_panel_design_ja.md` を参照。

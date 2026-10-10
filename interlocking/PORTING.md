@@ -141,6 +141,23 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 - `cmake/SimutransSourceList.cmake`: `simworld.cc` の後に同じ 5 ファイル。
 - `Simutrans-Main.vcxitems`: `simworld.cc` の `ClCompile` の後に同じ 5 ファイル。
 
+## 移植の記録
+
+### v50.2 → v62.0.3（2026-10）
+
+- 方法: 本家のタグ `v62_0_3` をこのブランチにマージ（このリポジトリの main は本家の履歴の途中なので、共通の祖先がある）。
+  `git fetch https://github.com/teamhimeh/simutrans refs/tags/v62_0_3:refs/tags/otrp-v62_0_3` → `git merge otrp-v62_0_3`
+- 衝突: H6（ツール番号・ツール名・ツール生成）と H4（`destroy()`）の 3 か所だけ。本家の追加分の**後ろ**にフックを置いて解消。
+- 本体の変更で `interlocking/` 側を直したところ:
+  - v51 以降、経路探索は `step` の中でしか行えない（`sync_step` から呼ぶと共有の探索用配列を壊す）。
+    選択信号と同じく、`sync_step` からの呼び出しでは `cnv->request_signal_check_in_step()` を呼んで停止し、
+    step での再確認（`call_by_step == true`）のときに経路を作るようにした（`il_manager.cc` の `on_signal()`）。
+  - テストの時刻表の文字列（`TOOL_CHANGE_CONVOI` の `g`）は、各停車駅の項目が 12 個 → 14 個に増えた。
+- 確認したが変更不要だったところ:
+  - セーブの末尾: 読み込み側に本家 124 系向けのブロック（チャット・速度記録）が増えたが、OTRP は 122 形式で保存するので
+    そのブロックは通らない。保存側（motd の直後）と読み込み側のフックの位置は一致している。
+  - 経路の置き換え（`remove_koord_from()` → `append()`）は v62 の選択信号も同じ方法。コーナー情報は座標から計算される。
+
 ## `interlocking/` から使っている本体の関数
 
 v60 でこれらの名前や引数が変わっていたら、`interlocking/` 側を直す（`check_hooks.sh` でも確認する）。

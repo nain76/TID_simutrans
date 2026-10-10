@@ -14,6 +14,9 @@
 #include "simimg.h"
 #include "scr_coord.h"
 
+#include <string>
+
+class raw_image_t;
 
 #if COLOUR_DEPTH != 0
 
@@ -175,6 +178,11 @@ void display_scroll_band( const scr_coord_val start_y, const scr_coord_val x_off
 
 // set first and second company color for player
 void display_set_player_color_scheme(const int player, const uint8 col1, const uint8 col2 );
+
+// draw image with per-object line color substitution (live rendering, no image cache slot used)
+void display_color_img_line(const image_id n, scr_coord_val xp, scr_coord_val yp, const uint8 col, const sint8 player_nr, const bool daynight, const bool dirty  CLIP_NUM_DEF);
+// base-image variant: uses base coords when GUI viewport scale differs from game zoom
+void display_base_img_line(const image_id n, scr_coord_val xp, scr_coord_val yp, const uint8 col, const sint8 player_nr, const bool daynight, const bool dirty  CLIP_NUM_DEF);
 
 // only used for GUI, display image inside a rect
 void display_img_aligned( const image_id n, scr_rect area, int align, const bool dirty);
@@ -349,6 +357,8 @@ void display_direct_line_rgb(const scr_coord_val x, const scr_coord_val y, const
 void display_direct_line_dotted_rgb(const scr_coord_val x, const scr_coord_val y, const scr_coord_val xx, const scr_coord_val yy, const scr_coord_val draw, const scr_coord_val dontDraw, const PIXVAL color);
 void display_circle_rgb( scr_coord_val x0, scr_coord_val  y0, int radius, const PIXVAL color );
 void display_filled_circle_rgb( scr_coord_val x0, scr_coord_val  y0, int radius, const PIXVAL color );
+void display_diamond_rgb(scr_coord_val x0, scr_coord_val y0, int radius, const PIXVAL colval);
+void display_filled_diamond_rgb(scr_coord_val x0, scr_coord_val y0, int radius, const PIXVAL colval);
 void draw_bezier_rgb(scr_coord_val Ax, scr_coord_val Ay, scr_coord_val Bx, scr_coord_val By, scr_coord_val ADx, scr_coord_val ADy, scr_coord_val BDx, scr_coord_val BDy, const PIXVAL colore, scr_coord_val draw, scr_coord_val dontDraw);
 
 void display_right_triangle_rgb(scr_coord_val x, scr_coord_val y, scr_coord_val height, const PIXVAL colval, const bool dirty);
@@ -363,6 +373,10 @@ void display_pop_clip_wh(CLIP_NUM_DEF0);
 
 
 bool display_snapshot( const scr_rect &area );
+/// Capture a screen area as PNG data without writing a screenshot file.
+bool display_snapshot_png(const scr_rect &area, std::string &png_data);
+/// Copy a screen area into an RGB888 image at the given destination position.
+bool display_snapshot(const scr_rect &area, raw_image_t &image, const scr_coord &destination);
 
 #if COLOUR_DEPTH != 0
 extern uint8 display_day_lights[  LIGHT_COUNT * 3];

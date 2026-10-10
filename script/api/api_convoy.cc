@@ -15,7 +15,9 @@
 #include "../../simhalt.h"
 #include "../../simline.h"
 #include "../../simworld.h"
+#include "../../simware.h"
 #include "../../vehicle/simvehicle.h"
+#include "../../dataobj/schedule.h"
 
 // for convoy tools
 #include "../../simmenu.h"
@@ -66,7 +68,7 @@ sint32 convoy_get_kmh(convoi_t const* cnv)
 
 vector_tpl<convoihandle_t> const* generic_get_convoy_list(HSQUIRRELVM vm, SQInteger index)
 {
-	uint16 id;
+	uint32 id;
 	bool use_world;
 	if (SQ_SUCCEEDED(get_slot(vm, "halt_id", id, index))) {
 		halthandle_t halt;
@@ -153,9 +155,48 @@ call_tool_init convoy_generic_tool(convoi_t *cnv, player_t *player, uint8 cnvtoo
 	return call_tool_init(TOOL_CHANGE_CONVOI | SIMPLE_TOOL, buf, 0, player);
 }
 
+call_tool_init convoy_change_schedule(convoi_t *cnv, player_t *player, schedule_t *sched)
+{
+	if (sched) {
+		cbuffer_t buf;
+		schedule_t *copy = sched->copy();
+		if (copy->get_count() >= 2) {
+			buf.printf("g,%u,", cnv->self.get_id());
+			copy->sprintf_schedule(buf);
+		}
+		else {
+			delete copy;
+			return "Invalid schedule provided: less than two entries remained after removing doubles";
+		}
+		delete copy;
+		return call_tool_init(TOOL_CHANGE_CONVOI | SIMPLE_TOOL, buf, 0, player);
+	}
+	return "Invalid schedule provided";
+}
+
 bool convoy_is_schedule_editor_open(convoi_t *cnv)
 {
 	return cnv->get_state() == convoi_t::EDIT_SCHEDULE;
+}
+
+
+SQInteger convoy_get_cargo(HSQUIRRELVM vm)
+{
+	convoi_t* cnv = param<convoi_t*>::get(vm, 1);
+	sq_newarray(vm, 0);
+	if (!cnv) {
+		return 1;
+	}
+	for (uint16 i = 0; i < cnv->get_vehicle_count(); i++) {
+		sq_newarray(vm, 0);
+		const slist_tpl<ware_t>& cargo = cnv->get_vehikel(i)->get_cargo();
+		for (const ware_t& ware : cargo) {
+			param<ware_t>::push(vm, ware);
+			sq_arrayappend(vm, -2);
+		}
+		sq_arrayappend(vm, -2);
+	}
+	return 1;
 }
 
 bool convoy_is_loading(convoi_t *cnv)
@@ -349,13 +390,33 @@ void export_convoy(HSQUIRRELVM vm)
 	 */
 	register_method_fv(vm, convoy_generic_tool, "destroy", freevariable<uint8>('x'), true);
 	/**
+	 * Change the schedule of the convoy.
+	 * @param pl player to pay for the change
+	 * @param sched new schedule
+	 * @ingroup game_cmd
+	 */
+	register_method(vm, convoy_change_schedule, "change_schedule", true);
+	/**
 	 * @returns returns true if the schedule of the convoy is currently being edited.
 	 */
 	register_method(vm, convoy_is_schedule_editor_open, "is_schedule_editor_open", true);
 	/**
-	 * @returns returns the number of station tiles covered by the convoy.
+	 * Get the current internal state of the convoy.
+	 * (e.g. 5 is NO_ROUTE, 6 is DRIVING, 8 is WAITING_FOR_CLEARANCE)
+	 * @returns the state of the convoy
+	 */
+	register_method(vm, &convoi_t::get_state, "get_state");
+	/**
+	 * @returns length of convoy in tiles
 	 */
 	register_method(vm, &convoi_t::get_tile_length, "get_tile_length");
+	/**
+	 * Returns cargo loaded in each vehicle of this convoy.
+	 * @returns array of arrays: outer array indexed by vehicle position,
+	 *          inner array contains good_x instances for each goods packet.
+	 * @typemask array(array(good_x))()
+	 */
+	register_function(vm, convoy_get_cargo, "get_cargo", 1, "x");
 
 #define STATIC
 	/**

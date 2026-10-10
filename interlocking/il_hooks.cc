@@ -26,9 +26,9 @@
 static bool restore_ui_suppressed = false;
 
 
-bool interlocking_hook_signal(rail_vehicle_t *v, uint16 next_block, sint32 &restart_speed, bool /*call_by_step*/, bool &result)
+bool interlocking_hook_signal(rail_vehicle_t *v, uint16 next_block, sint32 &restart_speed, bool call_by_step, bool &result)
 {
-	return interlocking_manager_t::get()->on_signal(v, next_block, restart_speed, result);
+	return interlocking_manager_t::get()->on_signal(v, next_block, restart_speed, call_by_step, result);
 }
 
 

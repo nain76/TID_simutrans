@@ -67,7 +67,7 @@ public:
 	const char *execute(const char *param, player_t *player);
 
 	/// see interlocking_hook_signal()
-	bool on_signal(rail_vehicle_t *v, uint16 next_block, sint32 &restart_speed, bool &result);
+	bool on_signal(rail_vehicle_t *v, uint16 next_block, sint32 &restart_speed, bool call_by_step, bool &result);
 
 	void step();
 

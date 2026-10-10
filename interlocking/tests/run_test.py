@@ -149,7 +149,7 @@ def run(args):
 
         print("[2] the train waits at S1")
         cid = p.request("debug_convoys")["convoys"][0]["id"]
-        sched = "0|0|0|2|0|14,5,0,0,0,0,0,0,0,0,0,100|7,5,0,0,0,0,0,0,0,0,0,100|"
+        sched = "0|0|0|2|0|14,5,0,0,0,0,0,0,0,0,0,100,0,0|7,5,0,0,0,0,0,0,0,0,0,100,0,0|"
         p.request(f"debug_tool {simple_tool_id('TOOL_CHANGE_CONVOI')} g,{cid},{sched}")
         time.sleep(1)
         p.request(f"debug_tool {simple_tool_id('TOOL_CHANGE_DEPOT')} b,1,5,0,{cid}")

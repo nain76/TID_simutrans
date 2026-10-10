@@ -1,8 +1,8 @@
 diff --git a/Makefile b/Makefile
-index b4ccb0c..4076558 100644
+index a7d13d66f..6b4854b83 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -587,6 +587,12 @@ SOURCES += simtool-scripted.cc
+@@ -598,6 +598,12 @@ SOURCES += simtool-scripted.cc
  SOURCES += simtool-script-generator.cc
  SOURCES += simware.cc
  SOURCES += simworld.cc
@@ -16,7 +16,7 @@ index b4ccb0c..4076558 100644
  SOURCES += squirrel/sqstdlib/sqstdaux.cc
  SOURCES += squirrel/sqstdlib/sqstdblob.cc
 diff --git a/Simutrans-Main.vcxitems b/Simutrans-Main.vcxitems
-index 29bfd41..cfdce12 100644
+index 29bfd4112..cfdce12e4 100644
 --- a/Simutrans-Main.vcxitems
 +++ b/Simutrans-Main.vcxitems
 @@ -42,6 +42,12 @@
@@ -33,7 +33,7 @@ index 29bfd41..cfdce12 100644
      <ClCompile Include="$(MSBuildThisFileDirectory)bauer\brueckenbauer.cc" />
      <ClCompile Include="$(MSBuildThisFileDirectory)bauer\fabrikbauer.cc" />
 diff --git a/cmake/SimutransSourceList.cmake b/cmake/SimutransSourceList.cmake
-index 726627f..3102b1c 100644
+index 726627f2c..3102b1c90 100644
 --- a/cmake/SimutransSourceList.cmake
 +++ b/cmake/SimutransSourceList.cmake
 @@ -296,6 +296,11 @@ target_sources(simutrans PRIVATE
@@ -49,7 +49,7 @@ index 726627f..3102b1c 100644
  		squirrel/sqstdlib/sqstdaux.cc
  		squirrel/sqstdlib/sqstdblob.cc
 diff --git a/simmenu.cc b/simmenu.cc
-index 8e7f5a3..9ba1c92 100644
+index 5cac9c9bf..67b064f18 100644
 --- a/simmenu.cc
 +++ b/simmenu.cc
 @@ -45,6 +45,7 @@
@@ -60,39 +60,39 @@ index 8e7f5a3..9ba1c92 100644
  
  karte_ptr_t tool_t::welt;
  
-@@ -161,6 +162,7 @@ const char *tool_t::id_to_string(uint16 id)
- 		CASE_TO_STRING(TOOL_ROLLUP_ALL_WIN);
- 		CASE_TO_STRING(TOOL_RECOLOUR_TOOL);
- 		CASE_TO_STRING(TOOL_CHANGE_FACTORY);
+@@ -170,6 +171,7 @@ const char *tool_t::id_to_string(uint16 id)
+ 		CASE_TO_STRING(TOOL_RESET_GAME_SPEED);
+ 		CASE_TO_STRING(TOOL_FIX_GAME_SPEED);
+ 		CASE_TO_STRING(TOOL_SHOW_WAY_OFFSET_LABEL);
 +		CASE_TO_STRING(TOOL_INTERLOCKING); // TID_IL H6
  		CASE_TO_STRING(UNUSED_TOOL_ADD_MESSAGE);
  		CASE_TO_STRING(UNUSED_WKZ_PWDHASH_TOOL);
  		}
-@@ -341,6 +343,7 @@ tool_t *create_simple_tool(int toolnr)
- 		case TOOL_MERGE_PLAYER:      tool = new tool_merge_player_t(); break;
- 		case TOOL_CHANGE_HALT:       tool = new tool_change_halt_t(); break;
- 		case TOOL_CHANGE_FACTORY:	 tool = new tool_change_factory_t(); break;
+@@ -362,6 +364,7 @@ tool_t *create_simple_tool(int toolnr)
+ 		case TOOL_SHOW_WAY_OFFSET_LABEL: tool = new tool_show_way_offset_label_t(); break;
+ 		case TOOL_SHOW_ONLY_OWN_VEHICLE_STATES:		tool = new tool_only_own_vehicle_states_t(); break;
+ 		case TOOL_FOLLOW_CONVOI_UNDERGROUND:		tool = new tool_follow_convoi_underground_t(); break;
 +		case TOOL_INTERLOCKING:      tool = new tool_interlocking_t(); break; // TID_IL H6
  		default:                    dbg->error("create_simple_tool()","cannot satisfy request for simple_tool[%i]!",toolnr);
  		                            return NULL;
  	}
 diff --git a/simmenu.h b/simmenu.h
-index f11cede..d2064d6 100644
+index 7852a1226..4dd40076b 100644
 --- a/simmenu.h
 +++ b/simmenu.h
-@@ -137,6 +137,7 @@ enum {
- 	TOOL_MERGE_PLAYER,
- 	TOOL_CHANGE_HALT,
- 	TOOL_CHANGE_FACTORY,
+@@ -149,6 +149,7 @@ enum {
+ 	TOOL_SHOW_WAY_OFFSET_LABEL,
+ 	TOOL_SHOW_ONLY_OWN_VEHICLE_STATES,
+ 	TOOL_FOLLOW_CONVOI_UNDERGROUND,
 +	TOOL_INTERLOCKING, // TID_IL H6
  	SIMPLE_TOOL_COUNT,
  	SIMPLE_TOOL = 0x2000
  };
 diff --git a/simworld.cc b/simworld.cc
-index bde9227..29465ac 100644
+index db4ffd0b6..11dfb6be6 100644
 --- a/simworld.cc
 +++ b/simworld.cc
-@@ -106,6 +106,8 @@
+@@ -108,6 +108,8 @@
  #include "player/ai_goods.h"
  #include "player/ai_scripted.h"
  
@@ -101,9 +101,9 @@ index bde9227..29465ac 100644
  // forward declaration - management of rotation for scripting
  namespace script_api
  {
-@@ -519,6 +521,9 @@ void karte_t::destroy()
+@@ -524,6 +526,9 @@ assert( depot_t::get_depot_list().empty() );
  
- assert( depot_t::get_depot_list().empty() );
+ 	convoy_templates.clear();
  
 +#ifdef TID_INTERLOCKING // TID_IL H4
 +	interlocking_hook_reset();
@@ -111,7 +111,7 @@ index bde9227..29465ac 100644
  	DBG_MESSAGE("karte_t::destroy()", "world destroyed");
  	destroying = false;
  }
-@@ -3414,6 +3419,10 @@ DBG_MESSAGE( "karte_t::rotate90()", "called" );
+@@ -3467,6 +3472,10 @@ DBG_MESSAGE( "karte_t::rotate90()", "called" );
  
  	script_api::rotate90();
  
@@ -122,7 +122,7 @@ index bde9227..29465ac 100644
  	// finally recalculate schedules for goods in transit ...
  	set_schedule_counter();
  
-@@ -4160,6 +4169,9 @@ void karte_t::set_schedule_counter()
+@@ -4287,6 +4296,9 @@ void karte_t::set_schedule_counter()
  void karte_t::step()
  {
  	DBG_DEBUG4("karte_t::step", "start step");
@@ -132,7 +132,7 @@ index bde9227..29465ac 100644
  	uint32 time = dr_time();
  
  	// calculate delta_t before handling overflow in ticks
-@@ -4940,6 +4952,9 @@ DBG_MESSAGE("karte_t::save(loadsave_t *file)", "motd filename %s", env_t::server
+@@ -5108,6 +5120,9 @@ DBG_MESSAGE("karte_t::save(loadsave_t *file)", "motd filename %s", env_t::server
  		}
  	}
  
@@ -142,7 +142,7 @@ index bde9227..29465ac 100644
  	// save all open windows (upon request)
  	file->rdwr_byte( active_player_nr );
  	rdwr_all_win(file);
-@@ -5540,6 +5555,9 @@ DBG_MESSAGE("karte_t::load()", "%d factories loaded", fab_list.get_count());
+@@ -5802,6 +5817,9 @@ DBG_MESSAGE("karte_t::load()", "%d factories loaded", fab_list.get_count());
  		}
  	}
  
@@ -152,7 +152,7 @@ index bde9227..29465ac 100644
  	if(  file->is_version_atleast(102, 4)  ) {
  		if(  env_t::restore_UI  ) {
  			file->rdwr_byte( active_player_nr );
-@@ -5553,6 +5571,9 @@ DBG_MESSAGE("karte_t::load()", "%d factories loaded", fab_list.get_count());
+@@ -5815,6 +5833,9 @@ DBG_MESSAGE("karte_t::load()", "%d factories loaded", fab_list.get_count());
  	}
  
  	file->set_buffered(false);
@@ -162,7 +162,7 @@ index bde9227..29465ac 100644
  	clear_random_mode(LOAD_RANDOM);	
  
  	// (Workaround) Sometimes, building tile placement is broken. Remove such buildings.
-@@ -7486,6 +7507,9 @@ bool karte_t::interactive(uint32 quit_month)
+@@ -7779,6 +7800,9 @@ bool karte_t::interactive(uint32 quit_month)
  
  		// check events queued since our last iteration
  		eventmanager->check_events();
@@ -173,7 +173,7 @@ index bde9227..29465ac 100644
  		if (env_t::quit_simutrans){
  			break;
 diff --git a/vehicle/simvehicle.cc b/vehicle/simvehicle.cc
-index fd9d6d7..9c2f572 100644
+index d8e7686c2..79691b3ca 100644
 --- a/vehicle/simvehicle.cc
 +++ b/vehicle/simvehicle.cc
 @@ -63,6 +63,7 @@
@@ -184,7 +184,7 @@ index fd9d6d7..9c2f572 100644
  #include "simroadtraffic.h"
  
  
-@@ -4013,6 +4014,10 @@ bool rail_vehicle_t::is_signal_clear(uint16 next_block, sint32 &restart_speed, b
+@@ -5199,6 +5200,10 @@ bool rail_vehicle_t::is_signal_clear(uint16 next_block, sint32 &restart_speed, b
  		cnv->clear_reserved_tiles();
  	}
  

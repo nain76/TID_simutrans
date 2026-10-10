@@ -9,11 +9,16 @@
  *
  * @section api-trunk Current trunk
  *
+ * - Added @ref gui::open_dialog_tool to open dialog tools
+ * - Added @ref world::create_player to create player companies (scenario only)
  * - Added @ref command_x::grid_lower, @ref command_x::grid_raise
  * - Added @ref settings::has_double_slopes, @ref settings::get_way_height_clearance
  * - Added @ref tile_x::is_crossing
  * - Added @ref world_x::generate_goods to generate passengers, mail or freight (scenario only)
  * - Added @ref change_climate_at
+ * - Extended halt_x::get_connections entries with raw_weight and is_foot_path
+ * - Added Squirrel accessors for transit_by_foot, foot_path_weight, foot_path_time_ticks, and walk_cost_to_halt
+ * - Changed world::generate_goods to include origin and destination walking costs in route selection
  * - Added @ref convoy_x::change_schedule
  * - Added tool_ids::tool_build_groundobj
  * - Changed building_desc_x::get_available_stations to accept wt_all
@@ -168,4 +173,12 @@
  *
  * Initial release and minor changes.
  *
+ * @section api-OTRP-51
+ * - halt_x::get_connections() now returns a table with three properties: halt (halt_x), weight (integer), and line (line_x or convoy_x)
+ * - Added schedule_x::base_waiting_time property
+ * - Fixed schedule_entry_x to properly expose x, y, z coordinates
+ * 
+ * @attention Breaking change: halt_x::get_connections() return type changed.
+ * Previously returned halt_x directly, now returns table {halt, weight, line}.
+ * Update existing scripts: change `conn` to `conn.halt` to access the halt.
  */

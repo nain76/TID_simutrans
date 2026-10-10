@@ -103,7 +103,7 @@ try {
 	await waitFor(async () => (await getJson("/api/status")).stations[0].manual, 15000, "manual mode");
 	check(true, "operator mode");
 	const cid = (await lineRequest("debug_convoys")).convoys[0].id;
-	await lineRequest(`debug_tool ${simpleToolId("TOOL_CHANGE_CONVOI")} g,${cid},0|0|0|2|0|14,5,0,0,0,0,0,0,0,0,0,100|7,5,0,0,0,0,0,0,0,0,0,100|`);
+	await lineRequest(`debug_tool ${simpleToolId("TOOL_CHANGE_CONVOI")} g,${cid},0|0|0|2|0|14,5,0,0,0,0,0,0,0,0,0,100,0,0|7,5,0,0,0,0,0,0,0,0,0,100,0,0|`);
 	await sleep(500);
 	await lineRequest(`debug_tool ${simpleToolId("TOOL_CHANGE_DEPOT")} b,1,5,0,${cid}`);
 	await page.waitForSelector("#approach div", { timeout: 30000 });

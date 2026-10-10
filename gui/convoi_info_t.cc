@@ -27,12 +27,15 @@
 #include "../utils/simstring.h"
 #include "convoi_detail_t.h"
 #include "convoi_stops_list_t.h"
+#include "depot_picker.h"
+#include "route_display.h"
+#include "minimap.h"
 
 #define CHART_HEIGHT (100)
 
 static const char cost_type[convoi_t::MAX_CONVOI_COST][64] =
 {
-	"Free Capacity", "Transported", "Revenue", "Operation", "Profit", "Distance", "Maxspeed", "Way toll"
+	"Free Capacity", "Transported", "Revenue", "Operation", "Profit", "Distance", "Maxspeed", "Way toll", "Freight ton-kilo", "Distance (m)"
 };
 
 static const uint8 cost_type_color[convoi_t::MAX_CONVOI_COST] =
@@ -44,12 +47,14 @@ static const uint8 cost_type_color[convoi_t::MAX_CONVOI_COST] =
 	COL_PROFIT,
 	COL_DISTANCE,
 	COL_MAXSPEED,
-	COL_TOLL
+	COL_TOLL,
+	COL_TONKILO,
+	COL_DISTANCE
 };
 
 static const bool cost_type_money[convoi_t::MAX_CONVOI_COST] =
 {
-	false, false, true, true, true, false, false, true
+	false, false, true, true, true, false, false, true, false, false
 };
 
 
@@ -123,14 +128,18 @@ void convoi_info_t::init(convoihandle_t cnv)
 			end_table();
 
 			add_component(&container_line);
-			container_line.set_table_layout(3,1);
+			container_line.set_table_layout(4,1);
 			container_line.add_component(&line_button);
 			container_line.new_component<gui_label_t>("Serves Line:");
 			container_line.add_component(&line_label);
+			container_line.add_component(&bt_promote_to_line);
 			// goto line button
 			line_button.init( button_t::posbutton, NULL, scr_coord(D_MARGIN_LEFT, D_MARGIN_TOP + D_BUTTON_HEIGHT + D_V_SPACE + LINESPACE*4 ) );
 			line_button.set_targetpos3d( koord3d::invalid );
 			line_button.add_listener( this );
+			bt_promote_to_line.init( button_t::roundbox, "promote to line");
+			bt_promote_to_line.set_tooltip("Create a new line based on this schedule");
+			bt_promote_to_line.add_listener(this);
 			line_bound = false;
 		}
 		end_table();
@@ -153,7 +162,7 @@ void convoi_info_t::init(convoihandle_t cnv)
 		add_component(&button);
 
 		go_home_button.init(button_t::roundbox | button_t::flexible, "go home");
-		go_home_button.set_tooltip("Sends the convoi to the last depot it departed from!");
+		go_home_button.set_tooltip("Sends the convoi to the nearest depot. Ctrl+click to choose depot.");
 		go_home_button.add_listener(this);
 		add_component(&go_home_button);
 
@@ -216,7 +225,7 @@ void convoi_info_t::init(convoihandle_t cnv)
 	chart.set_min_size(scr_size(0, CHART_HEIGHT));
 	container_stats.add_component(&chart);
 
-	container_stats.add_table(4,2)->set_force_equal_columns(true);
+	container_stats.add_table(4,3)->set_force_equal_columns(true);
 
 	for (int cost = 0; cost<convoi_t::MAX_CONVOI_COST; cost++) {
 		uint16 curve = chart.add_curve( color_idx_to_rgb(cost_type_color[cost]), cnv->get_finance_history(), convoi_t::MAX_CONVOI_COST, cost, MAX_MONTHS, cost_type_money[cost], false, true, cost_type_money[cost]*2 );
@@ -314,7 +323,7 @@ void convoi_info_t::update_labels()
 	profit_label.update();
 
 	running_cost_label.buf().append("(");
-	running_cost_label.append_money(cnv->get_running_cost()/100.0);
+	running_cost_label.append_money(cnv->get_running_cost_scaled()/100.0);
 	running_cost_label.buf().append("/km)");
 	running_cost_label.update();
 
@@ -337,6 +346,9 @@ void convoi_info_t::update_labels()
 
 		line_label.buf().append(cnv->get_line()->get_name());
 		line_label.set_color(cnv->get_line()->get_state_color());
+		bt_promote_to_line.set_visible(false);
+	} else {
+		bt_promote_to_line.set_visible(true);
 	}
 	line_label.update();
 
@@ -348,7 +360,7 @@ void convoi_info_t::update_labels()
 		scroll_freight.set_size( scroll_freight.get_size() );
 	}
 
-	scroll_stops_list.set_size(  scr_size( scroll_stops_list.get_size().w,get_client_windowsize().h - scroll_stops_list.get_pos().y - D_MARGIN_BOTTOM )  );
+	scroll_stops_list.set_size(  scr_size( scroll_stops_list.get_size().w, switch_mode.get_size().h - scroll_stops_list.get_pos().y )  );
 
 	// realign container - necessary if strings changed length
 	container_top->set_size( container_top->get_size() );
@@ -371,22 +383,23 @@ void convoi_info_t::draw(scr_coord pos, scr_size size)
 	next_reservation_index = cnv->get_next_reservation_index();
 
 	// make titlebar dirty to display the correct coordinates
-	if(cnv->get_owner()==welt->get_active_player()  &&  !welt->get_active_player()->is_locked()) {
+	if(cnv->get_owner()==welt->get_active_player()  &&  welt->player_can_act_unrestricted(welt->get_active_player())) {
 
 		if (line_bound != cnv->get_line().is_bound()  ) {
 			line_bound = cnv->get_line().is_bound();
 			container_line.set_visible(line_bound);
 		}
 		line_button.enable();
+		bt_promote_to_line.enable();
 		
 		if(  cnv->get_coupling_convoi().is_bound()  ) {
 			button.set_tooltip("Uncouple the back convoy now.");
 			button.set_text("release back");
 			button.enable();
 		} else if(  cnv->is_coupled()  ) {
-			button.set_tooltip("Please decouple the other convoy to edit the schedule.");
-			button.set_text("Fahrplan");
-			button.disable();
+			button.set_tooltip("Reverse coupling order");
+			button.set_text("Reverse coupling");
+			button.enable();
 		} else {
 			button.set_tooltip("Alters a schedule.");
 			button.set_text("Fahrplan");
@@ -401,7 +414,7 @@ void convoi_info_t::draw(scr_coord pos, scr_size size)
 			if(  cnv->get_coupling_convoi().is_bound()  ) {
 				convoihandle_t c = cnv;
 				while( c.is_bound() ) {
-					if(  cnv->get_owner() != c->get_owner() || cnv->get_schedule()->get_waytype() != c->get_schedule()->get_waytype()  ) {
+					if(  cnv->get_owner() != c->get_owner() || cnv->front()->get_waytype() != c->front()->get_waytype()  ) {
 						show_go_home_button = false;
 					}
 					c = c->get_coupling_convoi();
@@ -418,8 +431,15 @@ void convoi_info_t::draw(scr_coord pos, scr_size size)
 		if(  grund_t* gr=welt->lookup(cnv->get_schedule()->get_current_entry().pos)  ) {
 			go_home_button.pressed = gr->get_depot() != NULL;
 		}
-		no_load_button.pressed = cnv->get_no_load();
-		no_load_button.enable();
+		no_load_button.pressed = cnv->get_no_load()||cnv->is_invalid_convoy();
+		if(  cnv->is_invalid_convoy()  ){
+			// this convoy is invalid convoy->out of service
+			no_load_button.set_text("Out of service");
+			no_load_button.disable();
+		}	
+		else {
+			no_load_button.enable();
+		}
 		set_recovery_button.pressed = cnv->is_in_delay_recovery();
 		set_recovery_button.enable();
 		if(  cnv->is_coupled() ){
@@ -443,8 +463,9 @@ void convoi_info_t::draw(scr_coord pos, scr_size size)
 			remove_component( &line_button );
 			line_bound = false;
 		}
+		bt_promote_to_line.disable();
 		button.set_text(cnv->get_owner()->get_name());
-		if(  !cnv->get_owner()->is_locked()  ) {
+		if(  welt->player_can_act_unrestricted(cnv->get_owner())  ) {
 			button.set_tooltip("move to the owner");
 			button.enable();
 		} else {
@@ -472,14 +493,27 @@ void convoi_info_t::draw(scr_coord pos, scr_size size)
 	route_bar.set_base(cnv->get_route()->get_count()-1);
 	cnv_route_index = cnv->front()->get_route_index() - 1;
 
-	// show route update
-	show_route(is_route_show);
-	route_show_button.pressed = is_route_show;
-	route_show_button.enable();
+	// show route update - while a whole-schedule route overlay is requested or
+	// shown (e.g. from the Stops tab or a schedule editor), the convoy route
+	// must not be drawn and its button is disabled
+	if(  welt->is_schedule_route_active()  ) {
+		if(  is_route_show  ) {
+			is_route_show = false;
+			show_route(false);
+		}
+		route_show_button.pressed = false;
+		route_show_button.disable();
+	}
+	else {
+		show_route(is_route_show);
+		route_show_button.pressed = is_route_show;
+		route_show_button.enable();
+	}
 
+	// update layout before rendering so upper section width matches current window size
+	set_windowsize(size);
 	// all gui stuff set => display it
 	gui_frame_t::draw(pos, size);
-	set_windowsize(size);
 }
 
 
@@ -505,6 +539,14 @@ koord3d convoi_info_t::get_weltpos( bool set )
 	}
 }
 
+void convoi_info_t::hide_route_display(void *owner)
+{
+	convoi_info_t *win = static_cast<convoi_info_t*>(owner);
+	win->is_route_show = false;
+	win->show_route(false);
+}
+
+
 void convoi_info_t::show_route(bool const yesno)
 {
 	if(!cnv_route.empty()) {
@@ -518,12 +560,17 @@ void convoi_info_t::show_route(bool const yesno)
 			}
 		}
 		cnv_route.clear();
+		minimap_t::get_instance()->clear_highlighted_route();
+	}
+	if(!yesno) {
+		route_display_t::deactivate(this);
 	}
 	if(!cnv.is_bound() || route_search_in_progress || cnv->get_state()==convoi_t::EDIT_SCHEDULE || cnv->get_route()->get_count()<1) {
 		return;
 	}
 	// draw route
 	if(yesno) {
+		route_display_t::activate(this, &convoi_info_t::hide_route_display);
 		for( uint32 i=0; i<cnv->get_route()->get_count(); i++) {
 			cnv_route.append(cnv->get_route()->at(i));
 		}
@@ -540,6 +587,7 @@ void convoi_info_t::show_route(bool const yesno)
 				}
 			}
 		}
+		minimap_t::get_instance()->set_highlighted_route(cnv_route.get_route());
 	}
 }
 
@@ -584,20 +632,24 @@ bool convoi_info_t::action_triggered( gui_action_creator_t *comp,value_t /* */)
 	}
 
 	// some actions only allowed, when I am the player
-	if(cnv->get_owner()==welt->get_active_player()  &&  !welt->get_active_player()->is_locked()) {
+	if(cnv->get_owner()==welt->get_active_player()  &&  welt->player_can_act_unrestricted(welt->get_active_player())) {
 
 		if(  comp == &button  ) {
 			if(  cnv->get_coupling_convoi().is_bound()  ) {
 				cnv->call_convoi_tool('r', NULL);
 				return true;
 			}
+			else if(  cnv->is_coupled()  ) {
+				cnv->call_convoi_tool('c', NULL);
+				return true;
+			}
 			else {
-			cnv->call_convoi_tool( 'f', NULL );
-			return true;
+				cnv->call_convoi_tool( 'f', NULL );
+				return true;
 			}
 		}
 
-		if(  comp == &no_load_button    &&    !route_search_in_progress  ) {
+		if(  comp == &no_load_button    &&    !route_search_in_progress  &&  !cnv->is_invalid_convoy()  ) {
 			cnv->call_convoi_tool( 'n', NULL );
 			return true;
 		}
@@ -606,6 +658,12 @@ bool convoi_info_t::action_triggered( gui_action_creator_t *comp,value_t /* */)
 			// limit update to certain states that are considered to be safe for schedule updates
 			int state = cnv->get_state();
 			if(state==convoi_t::EDIT_SCHEDULE) {
+				return true;
+			}
+
+			// Ctrl+click: open depot picker to choose destination
+			if(  event_get_last_control_shift() & 2  ) {
+				create_win(new depot_picker_t(cnv, false), w_info, magic_depot_picker);
 				return true;
 			}
 
@@ -645,6 +703,24 @@ bool convoi_info_t::action_triggered( gui_action_creator_t *comp,value_t /* */)
 
 		if(  comp == &reversed_button  ) {
 			cnv->call_convoi_tool( 'v', NULL );
+			return true;
+		}
+
+		if(  comp == &bt_promote_to_line  ) {
+			vector_tpl<linehandle_t> lines;
+			cnv->get_owner()->simlinemgmt.get_lines(cnv->get_schedule()->get_type(), &lines);
+			FOR(  vector_tpl<linehandle_t>, const line, lines  ) {
+				if(  cnv->get_schedule()->matches(  welt, line->get_schedule()  )  ) {
+					dbg->message("convoi_info_t::action_triggered()","%s's schedule matches line %s", cnv->get_name(), line->get_name());
+					char id[16];
+					sprintf( id, "%i,%i", line.get_id(), cnv->get_schedule()->get_current_stop() );
+					cnv->call_convoi_tool( 'l', id );
+					return true;
+				}
+			}
+			// not find match line -> create new one!
+			dbg->message("convoi_info_t::action_triggered()","%s's schedule did not match any lines", cnv->get_name());
+			cnv->call_convoi_tool( 'L', NULL );
 			return true;
 		}
 	}

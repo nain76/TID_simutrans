@@ -589,7 +589,7 @@ bool interlocking_manager_t::build_train_route(rail_vehicle_t *v, uint16 next_bl
 }
 
 
-bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sint32 &restart_speed, bool &result)
+bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sint32 &restart_speed, bool call_by_step, bool &result)
 {
 	convoi_t *cnv = v->get_convoi();
 	if(  cnv == NULL  ||  next_block >= cnv->get_route()->get_count()  ) {
@@ -627,6 +627,16 @@ bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sin
 	}
 
 	if(  r->state == IL_SET  ) {
+		// like the choose signal (OTRP v51+): the route search may only run in a step,
+		// not in a sync_step. Stop at the signal and let the convoy check again in its step.
+		if(  !cnv->is_waiting()  &&  !call_by_step  ) {
+			cnv->request_signal_check_in_step();
+			sig->set_state(roadsign_t::STATE_RED);
+			restart_speed = -1;
+			result = false;
+			return true;
+		}
+		cnv->set_signal_check_in_step_request_invalid();
 		vector_tpl<koord3d> tiles;
 		if(  !build_train_route(v, next_block, r, tiles)  ) {
 			// report only once per route and train (the train checks the signal again and again)

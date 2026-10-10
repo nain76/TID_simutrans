@@ -27,7 +27,9 @@
 #define LINE_DISTANCE          6 // distance covered by all convois
 #define LINE_MAXSPEED          7 // maximum speed for bonus calculation of all convois
 #define LINE_WAYTOLL           8 // way toll paid by vehicles of line
-#define MAX_LINE_COST          9 // Total number of cost items
+#define LINE_TONKILO		   9 // the amount of transported ware integrated by distance.
+#define LINE_DISTANCE_METERS      10 // distance covered by all convois, in meters (LINE_DISTANCE * settings_t::tile_length)
+#define MAX_LINE_COST          11 // Total number of cost items
 
 class karte_ptr_t;
 class loadsave_t;
@@ -88,6 +90,11 @@ private:
 	 * struct holds new financial history for line
 	 */
 	sint64 financial_history[MAX_MONTHS][MAX_LINE_COST];
+
+	/**
+	 * colour of line
+	 */
+	uint8 colour;
 
 	/**
 	 * creates empty schedule with type depending on line-type
@@ -152,6 +159,12 @@ public:
 	char const* get_memo() const { return memo; }
 	void set_memo(const char *memo);
 
+	/**
+	 * get colour of line
+	 */
+	uint8 const get_colour() const { return colour; }
+	void set_colour(const uint8 colour);
+
 	/*
 	 * load or save the line
 	 */
@@ -186,6 +199,7 @@ public:
 	sint64* get_finance_history() { return *financial_history; }
 
 	sint64 get_finance_history(int month, int cost_type) const { return financial_history[month][cost_type]; }
+	void set_finance_history(int month, int cost_type, sint64 value) { financial_history[month][cost_type] = value; }
 	sint64 get_stat_converted(int month, int cost_type) const;
 
 	void book(sint64 amount, int cost_type) { financial_history[0][cost_type] += amount; }

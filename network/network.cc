@@ -547,7 +547,7 @@ network_command_t* network_check_activity(karte_t *, int timeout)
 			network_command_t *nwc = socket_list_t::get_client(client_id).receive_nwc();
 			if (nwc) {
 				received_command_queue.append(nwc);
-				dbg->warning( "network_check_activity()", "received cmd %s (id %d) from socket[%d]", nwc->get_name(), nwc->get_id(), sender );
+				dbg->message( "network_check_activity()", "received cmd %s (id %d) from socket[%d]", nwc->get_name(), nwc->get_id(), sender );
 			}
 			// errors are caught and treated in socket_info_t::receive_nwc
 		}
@@ -909,7 +909,12 @@ bool prepare_for_server( char *externalIPAddress, char *externalAltIPAddress, in
 		struct UPNPUrls urls;
 		struct IGDdatas data;
 
+#if MINIUPNPC_API_VERSION <= 17
 		UPNP_GetValidIGD( devlist, &urls, &data, lanaddr, sizeof(lanaddr) );
+#else
+		char wanaddr[64] = "unset";
+		UPNP_GetValidIGD( devlist, &urls, &data, lanaddr, sizeof(lanaddr), wanaddr, sizeof(wanaddr) );
+#endif
 		// we must know our IP address first
 		if(  UPNP_GetExternalIPAddress(urls.controlURL, data.first.servicetype, externalIPAddress) ==  UPNPCOMMAND_SUCCESS  ) {
 			// this is our ID (at least the routes tells us this)
@@ -968,7 +973,12 @@ void remove_port_forwarding( int port )
 		struct UPNPUrls urls;
 		struct IGDdatas data;
 
+#if MINIUPNPC_API_VERSION <= 17
 		UPNP_GetValidIGD( devlist, &urls, &data, lanaddr, sizeof(lanaddr) );
+#else
+		char wanaddr[64] = "unset";
+		UPNP_GetValidIGD( devlist, &urls, &data, lanaddr, sizeof(lanaddr), wanaddr, sizeof(wanaddr) );
+#endif
 		// we must know our IP address first
 		if(  UPNP_GetExternalIPAddress(urls.controlURL, data.first.servicetype, externalIPAddress) ==  UPNPCOMMAND_SUCCESS  ) {
 			// this is our ID (at least the routes tells us this)

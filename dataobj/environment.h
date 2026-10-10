@@ -33,9 +33,16 @@ enum { MENU_LEFT, MENU_TOP, MENU_RIGHT, MENU_BOTTOM };
 class env_t
 {
 public:
+	/// Points to a global writable directory, where downloaded content content is stored
+	/// This directory is writable to all users to store global content (like paksets)
+	static char install_dir[PATH_MAX];
+
 	/// Points to the current simutrans data directory. Usually this is the same directory
 	/// where the executable is located, unless -use_workdir is specified.
 	static char data_dir[PATH_MAX];
+
+	/// the selected pak (whole path, can be write protected)
+	static std::string pak_dir;
 
 	static sint16 menupos;
 
@@ -224,6 +231,20 @@ public:
 
 	static scr_size iconsize;
 
+	/**
+	 * once tool_t::read_menu() has applied the pak-specific icon_height from
+	 * menuconf.tab to iconsize, this is set so later theme (re)loads don't
+	 * reset iconsize back to the theme's icon_width
+	 */
+	static bool iconsize_set_by_pak;
+
+	/**
+	 * thickness (in pixels) of the scrollbar strip drawn just outside the
+	 * main menu bar's icon row/column (below for MENU_TOP/BOTTOM, beside for
+	 * MENU_LEFT/RIGHT); the menu bar's on-screen footprint is iconsize plus this
+	 */
+	static const scr_coord_val menu_scrollbar_thickness = 10;
+
 	/// customize your tooltips
 	static bool show_tooltips;
 	static uint32 tooltip_color_rgb;
@@ -285,6 +306,21 @@ public:
 		MAX_SHOW_VEHICLE_STATES
 	};
 
+	/// show only own vehicles states
+	static bool show_only_own_vehicle_states;
+
+	static bool show_line_colors;
+	static bool show_convoy_loadinglevel;
+
+	/// Controls clipping of objects below elevated ways/bridges
+	/// 0 = never clip (no cut), 1 = always clip (all cut), 2 = use pak descriptor (pak dependence)
+	enum clip_below_mode {
+		CLIP_BELOW_NEVER  = 0,
+		CLIP_BELOW_ALWAYS = 1,
+		CLIP_BELOW_PAK    = 2
+	};
+	static sint8 clip_below;
+
 	/// show station coverage indicators
 	static uint8 station_coverage_show;
 
@@ -338,14 +374,32 @@ public:
 	static bool draw_outside_tile;
 
 	/**
+	 * Bit flags for show_names.
+	 * @see grund_t::display_overlay
+	 * @see haltestelle_t::display_status
+	 */
+	enum show_names_flags_t {
+		SHOW_NAME             = 1 << 0, ///< show city/station name label
+		SHOW_WAITING_BARS     = 1 << 1, ///< show station waiting bars
+		SHOW_NAME_TYPE2       = 1 << 2, ///< name label style 2 (outline)
+		SHOW_NAME_TYPE3       = 1 << 3, ///< name label style 3 (boxed)
+		SHOW_ALLOWED_PLAYERS  = 1 << 4  ///< show per-player stop permission bars
+	};
+
+	/**
 	 * Show labels (city and station names, ...)
-	 * and waiting indicator bar for stations
+	 * and waiting indicator bar / allowed player bars for stations
 	 * @see grund_t::display_overlay
 	 */
 	static sint32 show_names;
 
+	static sint32 const bars_settings = env_t::SHOW_WAITING_BARS|env_t::SHOW_ALLOWED_PLAYERS;
+
 	/// Show factory storage bar
 	static uint8 show_factory_storage_bar;
+
+	/// Show vehicle offset label on ways (format: "+3A" / "-2D")
+	static bool show_way_offset_label;
 
 	/// if a schedule is open, show tiles which are used by it
 	static bool visualize_schedule;
@@ -464,6 +518,10 @@ public:
 	/// @author THLeaderH
 	static bool previous_OTRP_data;
 
+	/// friction parameter on gravity: 
+	/// old: same as 112.3 when TILE_HEIGHT_STEP=16, not old: same as 120
+	static bool use_old_friction;
+
 	/// To make the snapshot like a commandline tool
 	/// can be set by command-line switch '-snapshot'
 	/// @author shingoushori
@@ -532,22 +590,20 @@ public:
 
 	static bool send_tax_public;
 
-	// Graphical offsets for reverseing vehicles
-	// [directions][offsets]
-	// directions:{"south", "west", "southwest", "southeast", "north", "east", "northeast", "northwest"}
-	// offsets   :{x_offset,y_offset,length_offset}
-	// these parameters are written in simuconf.tab, such as:
-	// 	reverse_base_offset_east = 0, 0, 18
-	// 	reverse_base_offset_west = 0, 2, 14 
-	//
-	// Write the 8 directions in characters and the amount of offset in numbers with 3 components.
-	// the reading method is in setting_t, and these parameters are used in vehicle_t.
-	static sint8 reverse_base_offsets[8][3];
+	// offset for all vehicles
+	// [car direction][x/y direction][waytype]
+	static sint8 vehicle_base_offsets[8][2][waytype_t::air_wt+1];
+
+	// drivelelft offset
+	static sint8 driveleft_base_offsets[8][2];
+
+	// overtaking offset
+	static sint8 overtaking_base_offsets[8][2];
+
 	// define reversible waytype
 	static bool reversible_waytype(waytype_t w) {
 		return	w!=waytype_t::invalid_wt&&
 		w!=waytype_t::ignore_wt         &&
-		w!=waytype_t::road_wt           &&
 		w!=waytype_t::air_wt            &&
 		w!=waytype_t::powerline_wt      &&
 		w!=waytype_t::any_wt;

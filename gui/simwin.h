@@ -49,6 +49,7 @@ enum magic_numbers {
 	magic_climate,
 	magic_reliefmap,
 	magic_farbengui_t,
+	magic_line_colour_gui_t,
 	magic_color_gui_t,
 	magic_ki_kontroll_t,
 	magic_optionen_gui_t,
@@ -127,6 +128,7 @@ enum magic_numbers {
 	magic_factory_edit,
 	magic_baum_edit,
 	magic_groundobj_edit,
+	magic_depot_picker,
 	magic_max
 };
 
@@ -196,6 +198,12 @@ void move_win(int win);
 void win_display_flush(double konto); // draw the frame and all windows
 
 uint16 win_get_statusbar_height();
+
+// extra thickness (0 or env_t::menu_scrollbar_thickness) currently reserved for the
+// main menubar's scrollbar strip on the given side, i.e. whether the icons actually
+// overflow the available space for the current env_t::menupos; shared by win_display_flush()
+// and main_view_t::display() so the map view and the menu/window clip stay in sync
+scr_coord_val get_main_menu_scrollbar_extra();
 
 void win_poll_event(event_t*);
 

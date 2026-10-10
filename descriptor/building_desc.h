@@ -230,6 +230,8 @@ public:
 		return (layout & 1) ? size.y : size.x;
 	}
 
+	sint16 get_area() const { return size.x * size.y; }
+
 	uint8 get_all_layouts() const { return layouts; }
 
 	uint32 get_extra() const { return extra_data; }
@@ -254,6 +256,7 @@ public:
 	bool is_townhall()      const { return is_type(townhall); }
 	bool is_headquarters()   const { return is_type(headquarters); }
 	bool is_attraction() const { return is_type(attraction_land) || is_type(attraction_city); }
+	bool is_monument() const { return is_type(monument); }
 	bool is_factory()       const { return is_type(factory); }
 	bool is_city_building() const { return is_type(city_res) || is_type(city_com) || is_type(city_ind); }
 	bool is_transport_building() const { return type > headquarters  && type <= flat_dock; }
