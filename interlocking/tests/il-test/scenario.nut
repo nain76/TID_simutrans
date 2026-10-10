@@ -1,0 +1,78 @@
+//
+// This file is part of the Simutrans project under the Artistic License.
+// (see LICENSE.txt)
+//
+// Test layout for the TID interlocking panel (driven by interlocking/tests/run_test.py)
+//
+//  y=5   D . S1 J [A1 A1 A1] . . J . [B  B]      D = depot (1,5), S1 = entry signal (3,5)
+//  y=6          J-[A2 A2 A2]-----J               J = junctions (4,5) (11,5), curves (4,6) (11,6)
+//
+//  Station A has two platforms (y=5 and y=6), station B is a terminus at the east end.
+//  The train runs between B and A; on its way east it has to pass S1.
+//  OTRP has no script call to set a schedule, so the test driver sets the schedule
+//  and starts the train through the bridge (TOOL_CHANGE_CONVOI / TOOL_CHANGE_DEPOT).
+//
+
+map.file = "empty-16x16.sve"
+
+scenario.short_description = "TID interlocking test"
+scenario.author = "TID"
+scenario.version = "0.1"
+
+include("test_helpers")
+
+function get_rule_text(pl)   { return ttext("Interlocking test.") }
+function get_goal_text(pl)   { return ttext("-") }
+function get_info_text(pl)   { return ttext("-") }
+function get_result_text(pl) { return ttext("-") }
+function is_tool_allowed(pl, tool_id, wt) { return true }
+function is_scenario_completed(pl) { return 0 }
+
+function build_layout()
+{
+	local pl = player_x(0)
+	SET_PLAYER_FUNDS(pl, 100000000)
+	local rail = way_desc_x.get_available_ways(wt_rail, st_flat)[0]
+
+	ASSERT_EQUAL(command_x.build_way(pl, coord3d(1, 5, 0), coord3d(14, 5, 0), rail, true), null)
+	ASSERT_EQUAL(command_x.build_way(pl, coord3d(4, 5, 0), coord3d(4, 6, 0), rail, true), null)
+	ASSERT_EQUAL(command_x.build_way(pl, coord3d(4, 6, 0), coord3d(11, 6, 0), rail, true), null)
+	ASSERT_EQUAL(command_x.build_way(pl, coord3d(11, 6, 0), coord3d(11, 5, 0), rail, true), null)
+
+	local station_desc = building_desc_x.get_available_stations(building_desc_x.station, wt_rail, good_desc_x.passenger)[0]
+	foreach (x in [6, 7, 8]) {
+		ASSERT_EQUAL(command_x.build_station(pl, coord3d(x, 5, 0), station_desc), null)
+		ASSERT_EQUAL(command_x.build_station(pl, coord3d(x, 6, 0), station_desc), null)
+	}
+	ASSERT_EQUAL(command_x.build_station(pl, coord3d(13, 5, 0), station_desc), null)
+	ASSERT_EQUAL(command_x.build_station(pl, coord3d(14, 5, 0), station_desc), null)
+
+	ASSERT_EQUAL(command_x.build_depot(pl, coord3d(1, 5, 0), get_depot_by_wt(wt_rail)), null)
+
+	// a plain block signal for eastbound trains at (3,5)
+	local sig = sign_desc_x.get_available_signs(wt_rail).filter(@(i, s) (s.is_signal() && !s.is_choose_sign() && !s.is_pre_signal() && !s.is_longblock_signal() && !s.is_priority_signal()))[0]
+	local tile = tile_x(3, 5, 0)
+	for (local i = 0; i < 4; i++) {
+		ASSERT_EQUAL(command_x.build_sign_at(pl, tile, sig), null)
+		if (tile.get_way(wt_rail).get_dirs_masked() == dir.east) {
+			break
+		}
+	}
+	ASSERT_EQUAL(tile.get_way(wt_rail).get_dirs_masked(), dir.east)
+
+	// one train B <-> A
+	local depot = depot_x(1, 5, 0)
+	local loco = vehicle_desc_x.get_available_vehicles(wt_rail).filter(@(idx, v) (!v.needs_electrification() && v.can_be_first() && v.get_power() > 0))[0]
+	ASSERT_TRUE(depot.append_vehicle(pl, convoy_x(0), loco))
+	print("IL-TEST: layout ready")
+	return depot
+}
+
+function start()
+{
+	build_layout()
+}
+
+function resume_game()
+{
+}

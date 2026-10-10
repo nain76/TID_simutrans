@@ -1,0 +1,194 @@
+diff --git a/Makefile b/Makefile
+index b4ccb0c..55784c2 100644
+--- a/Makefile
++++ b/Makefile
+@@ -587,6 +587,11 @@ SOURCES += simtool-scripted.cc
+ SOURCES += simtool-script-generator.cc
+ SOURCES += simware.cc
+ SOURCES += simworld.cc
++# TID_IL H7: interlocking panel
++SOURCES += interlocking/il_bridge.cc
++SOURCES += interlocking/il_hooks.cc
++SOURCES += interlocking/il_manager.cc
++SOURCES += interlocking/il_tool.cc
+ SOURCES += squirrel/sq_extensions.cc
+ SOURCES += squirrel/sqstdlib/sqstdaux.cc
+ SOURCES += squirrel/sqstdlib/sqstdblob.cc
+diff --git a/Simutrans-Main.vcxitems b/Simutrans-Main.vcxitems
+index 29bfd41..ed49e02 100644
+--- a/Simutrans-Main.vcxitems
++++ b/Simutrans-Main.vcxitems
+@@ -42,6 +42,11 @@
+     <ClCompile Include="$(MSBuildThisFileDirectory)simtool-scripted.cc" />
+     <ClCompile Include="$(MSBuildThisFileDirectory)simware.cc" />
+     <ClCompile Include="$(MSBuildThisFileDirectory)simworld.cc" />
++    <!-- TID_IL H7: interlocking panel -->
++    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_bridge.cc" />
++    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_hooks.cc" />
++    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_manager.cc" />
++    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_tool.cc" />
+     <ClCompile Include="$(MSBuildThisFileDirectory)unicode.cc" />
+     <ClCompile Include="$(MSBuildThisFileDirectory)bauer\brueckenbauer.cc" />
+     <ClCompile Include="$(MSBuildThisFileDirectory)bauer\fabrikbauer.cc" />
+diff --git a/cmake/SimutransSourceList.cmake b/cmake/SimutransSourceList.cmake
+index 726627f..1ba781a 100644
+--- a/cmake/SimutransSourceList.cmake
++++ b/cmake/SimutransSourceList.cmake
+@@ -296,6 +296,10 @@ target_sources(simutrans PRIVATE
+ 		simtool-scripted.cc
+ 		simware.cc
+ 		simworld.cc
++		interlocking/il_bridge.cc # TID_IL H7
++		interlocking/il_hooks.cc # TID_IL H7
++		interlocking/il_manager.cc # TID_IL H7
++		interlocking/il_tool.cc # TID_IL H7
+ 		squirrel/sq_extensions.cc
+ 		squirrel/sqstdlib/sqstdaux.cc
+ 		squirrel/sqstdlib/sqstdblob.cc
+diff --git a/simmenu.cc b/simmenu.cc
+index 8e7f5a3..9ba1c92 100644
+--- a/simmenu.cc
++++ b/simmenu.cc
+@@ -45,6 +45,7 @@
+ 
+ #include "utils/simstring.h"
+ #include "network/memory_rw.h"
++#include "interlocking/il_tool.h" // TID_IL
+ 
+ karte_ptr_t tool_t::welt;
+ 
+@@ -161,6 +162,7 @@ const char *tool_t::id_to_string(uint16 id)
+ 		CASE_TO_STRING(TOOL_ROLLUP_ALL_WIN);
+ 		CASE_TO_STRING(TOOL_RECOLOUR_TOOL);
+ 		CASE_TO_STRING(TOOL_CHANGE_FACTORY);
++		CASE_TO_STRING(TOOL_INTERLOCKING); // TID_IL H6
+ 		CASE_TO_STRING(UNUSED_TOOL_ADD_MESSAGE);
+ 		CASE_TO_STRING(UNUSED_WKZ_PWDHASH_TOOL);
+ 		}
+@@ -341,6 +343,7 @@ tool_t *create_simple_tool(int toolnr)
+ 		case TOOL_MERGE_PLAYER:      tool = new tool_merge_player_t(); break;
+ 		case TOOL_CHANGE_HALT:       tool = new tool_change_halt_t(); break;
+ 		case TOOL_CHANGE_FACTORY:	 tool = new tool_change_factory_t(); break;
++		case TOOL_INTERLOCKING:      tool = new tool_interlocking_t(); break; // TID_IL H6
+ 		default:                    dbg->error("create_simple_tool()","cannot satisfy request for simple_tool[%i]!",toolnr);
+ 		                            return NULL;
+ 	}
+diff --git a/simmenu.h b/simmenu.h
+index f11cede..d2064d6 100644
+--- a/simmenu.h
++++ b/simmenu.h
+@@ -137,6 +137,7 @@ enum {
+ 	TOOL_MERGE_PLAYER,
+ 	TOOL_CHANGE_HALT,
+ 	TOOL_CHANGE_FACTORY,
++	TOOL_INTERLOCKING, // TID_IL H6
+ 	SIMPLE_TOOL_COUNT,
+ 	SIMPLE_TOOL = 0x2000
+ };
+diff --git a/simworld.cc b/simworld.cc
+index bde9227..29465ac 100644
+--- a/simworld.cc
++++ b/simworld.cc
+@@ -106,6 +106,8 @@
+ #include "player/ai_goods.h"
+ #include "player/ai_scripted.h"
+ 
++#include "interlocking/interlocking.h" // TID_IL
++
+ // forward declaration - management of rotation for scripting
+ namespace script_api
+ {
+@@ -519,6 +521,9 @@ void karte_t::destroy()
+ 
+ assert( depot_t::get_depot_list().empty() );
+ 
++#ifdef TID_INTERLOCKING // TID_IL H4
++	interlocking_hook_reset();
++#endif
+ 	DBG_MESSAGE("karte_t::destroy()", "world destroyed");
+ 	destroying = false;
+ }
+@@ -3414,6 +3419,10 @@ DBG_MESSAGE( "karte_t::rotate90()", "called" );
+ 
+ 	script_api::rotate90();
+ 
++#ifdef TID_INTERLOCKING // TID_IL H4
++	interlocking_hook_rotate90( cached_size.x );
++#endif
++
+ 	// finally recalculate schedules for goods in transit ...
+ 	set_schedule_counter();
+ 
+@@ -4160,6 +4169,9 @@ void karte_t::set_schedule_counter()
+ void karte_t::step()
+ {
+ 	DBG_DEBUG4("karte_t::step", "start step");
++#ifdef TID_INTERLOCKING // TID_IL H2
++	interlocking_hook_step();
++#endif
+ 	uint32 time = dr_time();
+ 
+ 	// calculate delta_t before handling overflow in ticks
+@@ -4940,6 +4952,9 @@ DBG_MESSAGE("karte_t::save(loadsave_t *file)", "motd filename %s", env_t::server
+ 		}
+ 	}
+ 
++#ifdef TID_INTERLOCKING // TID_IL H3
++	interlocking_hook_save( file );
++#endif
+ 	// save all open windows (upon request)
+ 	file->rdwr_byte( active_player_nr );
+ 	rdwr_all_win(file);
+@@ -5540,6 +5555,9 @@ DBG_MESSAGE("karte_t::load()", "%d factories loaded", fab_list.get_count());
+ 		}
+ 	}
+ 
++#ifdef TID_INTERLOCKING // TID_IL H3
++	interlocking_hook_load( file );
++#endif
+ 	if(  file->is_version_atleast(102, 4)  ) {
+ 		if(  env_t::restore_UI  ) {
+ 			file->rdwr_byte( active_player_nr );
+@@ -5553,6 +5571,9 @@ DBG_MESSAGE("karte_t::load()", "%d factories loaded", fab_list.get_count());
+ 	}
+ 
+ 	file->set_buffered(false);
++#ifdef TID_INTERLOCKING // TID_IL H3
++	interlocking_hook_load_finished();
++#endif
+ 	clear_random_mode(LOAD_RANDOM);	
+ 
+ 	// (Workaround) Sometimes, building tile placement is broken. Remove such buildings.
+@@ -7486,6 +7507,9 @@ bool karte_t::interactive(uint32 quit_month)
+ 
+ 		// check events queued since our last iteration
+ 		eventmanager->check_events();
++#ifdef TID_INTERLOCKING // TID_IL H5
++		interlocking_hook_interactive();
++#endif
+ 
+ 		if (env_t::quit_simutrans){
+ 			break;
+diff --git a/vehicle/simvehicle.cc b/vehicle/simvehicle.cc
+index fd9d6d7..9c2f572 100644
+--- a/vehicle/simvehicle.cc
++++ b/vehicle/simvehicle.cc
+@@ -63,6 +63,7 @@
+ #include "../bauer/vehikelbauer.h"
+ 
+ #include "simvehicle.h"
++#include "../interlocking/interlocking.h" // TID_IL
+ #include "simroadtraffic.h"
+ 
+ 
+@@ -4013,6 +4014,10 @@ bool rail_vehicle_t::is_signal_clear(uint16 next_block, sint32 &restart_speed, b
+ 		cnv->clear_reserved_tiles();
+ 	}
+ 
++#ifdef TID_INTERLOCKING // TID_IL H1: signal controlled by the interlocking panel
++	{ bool il_result; if(  interlocking_hook_signal( this, next_block, restart_speed, call_by_step, il_result )  ) { return il_result; } }
++#endif
++
+ 	// simple signal: fail, if next block is not free
+ 	if(  sig_desc->is_simple_signal()  ) {
+ 

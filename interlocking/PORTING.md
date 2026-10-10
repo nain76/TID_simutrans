@@ -1,0 +1,187 @@
+# 新しい OTRP 本体への移植手順（TID 連動盤）
+
+この機能は、OTRP 本体には**呼び出し口（フック）を約 30 行入れるだけ**で、中身はすべて `interlocking/` にある。
+新しい OTRP（例: v50 → v60）に載せ替えるときは、この手順に従う。
+
+## 手順
+
+```sh
+# 0. 新しい OTRP のソースを用意する（このリポジトリの本体コードを新版に置き換える）
+
+# 1. interlocking/ フォルダを丸ごとコピーする（変更不要のはず）
+
+# 2. フックのパッチを当てる
+git apply --3way interlocking/hooks.patch
+#    当たらなかった箇所は、下の「フック一覧」を見て手で入れる
+
+# 3. フックの入れ漏れと、使っている本体関数の有無を確認する
+sh interlocking/check_hooks.sh
+
+# 4. ビルドする（コンパイルエラー = 本体側の関数が変わった箇所。そこだけ追従する）
+make -j4
+
+# 5. 動作確認（下の「テスト」を参照）
+python3 interlocking/tests/run_test.py --sim build/default/sim --workdir <作業ディレクトリ>
+
+# 6. 新しいフックの差分でパッチを作り直す
+git diff -- vehicle/simvehicle.cc simworld.cc simmenu.h simmenu.cc Makefile \
+    cmake/SimutransSourceList.cmake Simutrans-Main.vcxitems > interlocking/hooks.patch
+```
+
+フックはすべて `#ifdef TID_INTERLOCKING` で囲み、`// TID_IL` の目印を付けてある。
+`grep -rn "TID_IL" --include=*.cc --include=*.h --include=Makefile .` で全部見つかる。
+`interlocking/interlocking.h` の `#define TID_INTERLOCKING 1` をコメントアウトすると、元の OTRP と同じ動作になる。
+
+## フック一覧
+
+行番号は版によってずれるので、**関数名と目印のコード**で場所を示す。
+v60 で関数が分割・改名されていたら、「役割」に合う場所を探して入れる。
+
+### H1 信号判定 — `vehicle/simvehicle.cc`
+
+- 役割: てこ扱い信号なら、信号を進行にするかどうかの判定を連動装置に任せる。
+- 場所: `rail_vehicle_t::is_signal_clear()` の中。`cnv->clear_reserved_tiles();` を呼ぶ `if` ブロックの**直後**、
+  信号の種類ごとの分岐（`is_simple_signal()` など）の**前**。
+- ファイル先頭の `#include "simvehicle.h"` の後に `#include "../interlocking/interlocking.h" // TID_IL`。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H1: signal controlled by the interlocking panel
+	{ bool il_result; if(  interlocking_hook_signal( this, next_block, restart_speed, call_by_step, il_result )  ) { return il_result; } }
+#endif
+```
+
+### H2 ステップ処理 — `simworld.cc`
+
+- 役割: 列車が通過した進路を自動で解除する（全クライアントで同じ順に実行される場所であること）。
+- 場所: `karte_t::step()` の先頭。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H2
+	interlocking_hook_step();
+#endif
+```
+
+### H3 セーブ／ロード — `simworld.cc`
+
+- 役割: 連動装置の定義と状態をセーブデータに入れる。
+- 保存: `karte_t::save(loadsave_t *file, ...)` の中、`// save all open windows` の
+  `file->rdwr_byte( active_player_nr );` の**直前**（motd の後）。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H3
+	interlocking_hook_save( file );
+#endif
+```
+
+- 読み込み: `karte_t::load(loadsave_t *file)` の中、`if( env_t::restore_UI )` で
+  `active_player_nr` とウィンドウ情報を読むブロックの**直前**（motd の後）。保存と同じ位置になること。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H3
+	interlocking_hook_load( file );
+#endif
+```
+
+- 読み込み完了: 同じ関数の `file->set_buffered(false);` の**直後**。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H3
+	interlocking_hook_load_finished();
+#endif
+```
+
+- 注意: 連動装置のデータは「マーカー 1 バイト（0xA5）＋本体」の形で書く。古いセーブではその位置が
+  プレイヤー番号（0〜15）なので区別できる。**OTRP 側でセーブ末尾の構成（motd → プレイヤー番号 → ウィンドウ）が
+  変わっていたら、ここは要確認**。
+
+### H4 マップ回転・破棄 — `simworld.cc`
+
+- 回転: `karte_t::rotate90()` の中、`script_api::rotate90();` の後。引数は回転後の `cached_size.x`。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H4
+	interlocking_hook_rotate90( cached_size.x );
+#endif
+```
+
+- 破棄: `karte_t::destroy()` の最後、`"world destroyed"` のメッセージの直前。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H4
+	interlocking_hook_reset();
+#endif
+```
+
+### H5 メインループ — `simworld.cc`
+
+- 役割: 外部の盤との通信（ローカルだけの処理。ゲーム状態は変えない）。
+- 場所: `karte_t::interactive()` のループ内、`eventmanager->check_events();` の直後。
+
+```cpp
+#ifdef TID_INTERLOCKING // TID_IL H5
+		interlocking_hook_interactive();
+#endif
+```
+
+- `simworld.cc` の include 群（`#include "player/ai_scripted.h"` の後など）に
+  `#include "interlocking/interlocking.h" // TID_IL`。
+
+### H6 ツール登録 — `simmenu.h` / `simmenu.cc`
+
+- 役割: 盤からの操作をネットワーク同期するためのツール `TOOL_INTERLOCKING`。
+- `simmenu.h`: simple tool の enum の**最後**（`SIMPLE_TOOL_COUNT` の直前）に `TOOL_INTERLOCKING, // TID_IL H6`。
+- `simmenu.cc`:
+  - include に `#include "interlocking/il_tool.h" // TID_IL`
+  - `CASE_TO_STRING(TOOL_INTERLOCKING); // TID_IL H6`（ツール名の一覧）
+  - `create_simple_tool()` の `switch` に `case TOOL_INTERLOCKING: tool = new tool_interlocking_t(); break; // TID_IL H6`
+
+### H7 ビルド設定
+
+- `Makefile`: `SOURCES += simworld.cc` の後に `interlocking/il_bridge.cc` `il_hooks.cc` `il_manager.cc` `il_tool.cc`。
+- `cmake/SimutransSourceList.cmake`: `simworld.cc` の後に同じ 4 ファイル。
+- `Simutrans-Main.vcxitems`: `simworld.cc` の `ClCompile` の後に同じ 4 ファイル。
+
+## `interlocking/` から使っている本体の関数
+
+v60 でこれらの名前や引数が変わっていたら、`interlocking/` 側を直す（`check_hooks.sh` でも確認する）。
+
+| 関数 | 使っている場所 |
+|---|---|
+| `rail_vehicle_t::block_reserver()` | `il_manager.cc` の `on_signal()` |
+| `convoi_t::access_route()` / `get_route()` / `get_coupling_convoi()` / `set_next_stop_index()` | 同上（経路の置き換え） |
+| `route_t::calc_route()` / `remove_koord_from()` / `append()` | 同上 |
+| `schiene_t::is_reserved()` / `get_reserved_convoi()` | 進路の設定判定・自動解除 |
+| `grund_t::get_neighbour()` / `weg_t::get_ribi()` | 進路の探索 |
+| `haltestelle_t::get_halt()` | 着点が番線かどうかの判定 |
+| `signal_t::set_state()` / `get_state()` | 信号の現示 |
+| `tool_t::simple_tool[]` / `karte_t::set_tool()` | ブリッジからのコマンド実行 |
+
+**選択信号の経路置き換え処理（`rail_vehicle_t::is_choose_signal_clear()`）を参考に、同等の処理を
+`il_manager.cc` の `on_signal()` に書いている。** OTRP 側でこの処理が変わっていたら、こちらにも反映するか確認する。
+
+## テスト
+
+`interlocking/tests/run_test.py` が、ヘッドレス版のゲームを起動して外部の盤と同じ経路（TCP ブリッジ）で操作し、
+次を確認する: てこ扱い信号で列車が止まる／敵対進路の拒否／扱者が選んだ番線を通る／通過後の自動解除／
+マップ回転／セーブ・ロード。
+
+```sh
+# ヘッドレス版のビルド（config.default）
+#   BACKEND = posix / COLOUR_DEPTH = 0 / OSTYPE = linux / MULTI_THREAD = 1
+make -j4
+
+# 作業ディレクトリ: simutrans/ の config, text, script, themes, font と pak64 を置き、
+#   pak64/scenario/il-test を interlocking/tests/il-test へのリンク（またはコピー）にする
+python3 interlocking/tests/run_test.py --sim build/default/sim --workdir <作業ディレクトリ>
+```
+
+## AI に移植を頼む場合の依頼文テンプレート
+
+```
+OTRP 本体を vXX に更新し、TID 連動盤（interlocking/）を載せ直してください。
+手順は interlocking/PORTING.md に従ってください。
+- interlocking/ はそのまま使い、本体には hooks.patch のフック（// TID_IL）だけを入れること
+- パッチが当たらない箇所は、PORTING.md の「フック一覧」の役割と場所の説明から入れる場所を判断すること
+- check_hooks.sh とビルドが通ることを確認し、run_test.py の結果を報告すること
+- 本体の既存コードのロジックは変更しないこと
+```
