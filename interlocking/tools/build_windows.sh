@@ -3,8 +3,8 @@
 #
 #   sh interlocking/tools/build_windows.sh <work dir>
 #
-# Needs: g++-mingw-w64-x86-64-posix, cmake, curl. Builds static zlib, bzip2, libpng and
-# freetype into <work dir>/prefix, then build/win64/sim.exe with config.win64.
+# Needs: g++-mingw-w64-x86-64-posix, cmake, curl. Builds static zlib, bzip2, libpng, freetype
+# and zstd into <work dir>/prefix, then build/win64/sim.exe with config.win64.
 set -e
 W=$(cd "$1" && pwd)
 H=x86_64-w64-mingw32
@@ -12,7 +12,8 @@ P=$W/prefix
 mkdir -p "$W/src" "$W/build" "$P/lib" "$P/include"
 cd "$W/src"
 for u in https://zlib.net/fossils/zlib-1.3.1.tar.gz https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz \
-         https://download.sourceforge.net/libpng/libpng-1.6.43.tar.gz https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.gz; do
+         https://download.sourceforge.net/libpng/libpng-1.6.43.tar.gz https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.gz \
+         https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz; do
 	[ -f "$(basename $u)" ] || curl -sSL -o "$(basename $u)" "$u"
 done
 cd "$W/build"
@@ -23,6 +24,8 @@ for f in "$W"/src/*.tar.gz; do tar xzf "$f"; done
 (mkdir -p ft && cd ft && cmake -S ../freetype-2.13.2 -B . -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=$H-gcc -DCMAKE_RC_COMPILER=$H-windres \
 	-DCMAKE_INSTALL_PREFIX="$P" -DBUILD_SHARED_LIBS=OFF -DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_BROTLI=ON -DFT_DISABLE_BZIP2=ON \
 	-DFT_DISABLE_PNG=ON -DFT_DISABLE_ZLIB=ON -DCMAKE_BUILD_TYPE=Release && make -j4 && make install)
+(make -C zstd-1.5.6/lib libzstd.a CC=$H-gcc AR=$H-ar ZSTD_LEGACY_SUPPORT=0 && cp zstd-1.5.6/lib/libzstd.a "$P/lib/" \
+	&& cp zstd-1.5.6/lib/zstd.h zstd-1.5.6/lib/zstd_errors.h zstd-1.5.6/lib/zdict.h "$P/include/")
 
 cat > "$W/ft-config" <<EOT
 #!/bin/sh
@@ -41,6 +44,7 @@ OPTIMISE = 1
 MULTI_THREAD = 1
 WIN32_CONSOLE = 1
 USE_FREETYPE = 1
+USE_ZSTD = 1
 STATIC = 1
 WITH_REVISION = 0
 CC = $H-gcc
