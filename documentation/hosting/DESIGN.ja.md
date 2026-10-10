@@ -1,4 +1,4 @@
-# Simutrans OTRP サーバ間借りサービス 設計書（ドラフト v0.6）
+# Simutrans OTRP サーバ間借りサービス 設計書（ドラフト v0.7）
 
 > 目的: 「自分ではサーバを立てられない人」が、Discord から数コマンドで
 > Simutrans OTRP のマルチプレイサーバを立て、仲間と遊べるようにする。
@@ -6,7 +6,7 @@
 > 副目的: 運営者（オンプレ保守経験のみ）が、**クラウド構築・IaC（Terraform / Ansible）・AI を使った運用**を
 > 実践を通して身につける。
 
-## 0. 決定事項・方針（v0.6）
+## 0. 決定事項・方針（v0.7）
 
 | 項目 | 決定 / 方針 | 状態 |
 |---|---|---|
@@ -27,6 +27,7 @@
 | 認証 | Discord アカウントをそのまま使う（Bot 方式なら別途ログイン機能は不要） | 提案 |
 | AI 活用 | AI は「データを読む・PR を作る」まで。本番変更は CI が人の承認後に行う（§13） | 提案 |
 | セキュリティ | **侵入される前提で設計する**（消せないバックアップ、SSH 非公開、作り直しで復旧）（§17） | 提案 |
+| 運営用の入口 | **SSH は Tailscale、Web 画面（Grafana 等）は Cloudflare Tunnel + Access**。公開ポートはゲーム用のみ（§17.4） | 決定 |
 
 ## 1. 前提整理（Simutrans サーバの性質）
 
@@ -422,6 +423,7 @@ simutrans-hosting/
 │   ├── site.yml                 # 全ロールをまとめて実行
 │   └── roles/
 │       ├── base/                # SSH は鍵認証・Tailscale 経由のみ、ufw、unattended-upgrades、fail2ban、auditd、時刻同期
+│       ├── tunnel/              # （O1 以降）cloudflared。Web 画面を Cloudflare Tunnel で公開
 │       ├── docker/              # Docker Engine と compose
 │       ├── simu_host/           # /srv/simu 配下、get_pak.sh で pak 取得、テンプレートセーブ
 │       ├── bot/                 # compose.yaml と .env を配置して起動
@@ -541,7 +543,7 @@ VPS 版で運用経験を積んだ後、段階的に移行する。
 
 | 段階 | 内容 | 前提 | おすすめ時期 | 身につくこと | 完了条件 |
 |---|---|---|---|---|---|
-| **O1 可視化** | Ansible `monitoring` ロール（node_exporter / cAdvisor / Prometheus / Grafana / Alertmanager → Discord）。Bot に `/metrics`（稼働サーバ数・サーバ別の接続人数・起動時間・停止理由）を追加 | S7、S8（GitOps で入れるため） | **運用開始から2〜4週間後**（データが溜まり始めてから意味が出る） | Prometheus / PromQL / Grafana、メトリクス設計 | ダッシュボードで「サーバ別のメモリ・CPU・人数」の推移が見られる |
+| **O1 可視化** | Ansible `monitoring` ロール（node_exporter / cAdvisor / Prometheus / Grafana / Alertmanager → Discord）。Grafana は **Cloudflare Tunnel + Access** 経由で公開（`tunnel` ロール、Access の設定は Terraform）。Bot に `/metrics`（稼働サーバ数・サーバ別の接続人数・起動時間・停止理由）を追加 | S7、S8（GitOps で入れるため） | **運用開始から2〜4週間後**（データが溜まり始めてから意味が出る） | Prometheus / PromQL / Grafana、メトリクス設計 | ダッシュボードで「サーバ別のメモリ・CPU・人数」の推移が見られる |
 | **O2 AI 週次レポート** | Bot 内の LLM API で、1週間の稼働・エラー・費用・（O1 があれば）グラフの数値を要約し運営チャンネルへ | S7 | O1 の後だと内容が具体的になる | LLM API の使い方、AI に渡すデータの設計 | 毎週月曜にレポートが届く |
 | **O3 Dots 秘書** | GitHub 読み取りのみで、週次まとめ・レビュー待ちの催促・料金/規約変更の見張り | S8 | 予算に余裕が出たら | 新しい AI エージェントの評価 | 本番権限を渡さずに役に立っている |
 
@@ -579,7 +581,8 @@ S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → [公開] → S10
 | GitHub | 正本（コード・設計書・Issue・PR）、CI（Actions）、イメージ置き場（GHCR） | 無料 | S1 | 必須 |
 | Discord（Developer Portal） | Bot アプリの登録、専用ギルド | 無料 | S1 | 必須 |
 | インフラ（Oracle / Lightsail / さくら / Vultr のいずれか） | ゲームサーバ・Bot を動かす VM | ¥0〜月 ¥2,000 程度 | S1 | **未決** |
-| Cloudflare | DNS、R2（バックアップ・Terraform state） | 無料（R2 は 10GB まで） | S1 | 必須 |
+| Cloudflare | DNS、R2（バックアップ・Terraform state）、Zero Trust（Tunnel + Access。O1 以降） | 無料（R2 は 10GB まで） | S1 | 必須 |
+| Tailscale | SSH の経路 | 無料（個人プラン） | S3 | 必須 |
 | 独自ドメイン | 接続先の名前（例 `simu.example.jp`） | 年 ¥1,000〜2,000 程度 | S2 | 任意（無ければ IP 直指定） |
 | Claude（有料プラン） | Claude Code（開発担当 AI） | 月 $20 前後 | S1 | 推奨 |
 | LLM API（Claude API など） | Bot 内のログ要約・レポート | 従量。月数十〜数百円 | S7 | 任意 |
@@ -599,6 +602,8 @@ S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → [公開] → S10
 | GitHub Actions | lint / plan / 反映 / 通知 | GitHub |
 | Uptime Kuma | 外部からの死活監視 | 任意 |
 | Prometheus / Grafana | 数値の収集・グラフ化・アラート（O1） | 任意（VM 上 or Grafana Cloud） |
+| Tailscale | 運営者 PC → VPS の SSH 経路 | 手元 PC・VM |
+| cloudflared（Cloudflare Tunnel） | Web 画面の公開（O1 以降） | VM |
 | WSL | Windows で Terraform / Ansible を動かす | 手元（Windows の場合） |
 
 ### 16.3 AI の担当
@@ -682,15 +687,26 @@ S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → [公開] → S10
 ### 17.4 アクセス経路
 
 ```
-運営者 PC ──(Tailscale 経由のみ)──▶ SSH :22           ← インターネットには非公開
-GitHub Actions ──▶ GHCR にイメージを置く            ← VM へは接続しない
-VM ──(定期的に取りに行く)──▶ GHCR / GitHub          ← 反映は VM からの取得方式
+運営者 PC ──(Tailscale)──────────────▶ SSH :22              ← インターネットには非公開
+運営者・共同管理者のブラウザ
+   ──▶ Cloudflare Access（ログイン確認）──▶ Tunnel ──▶ Grafana 等  ← VPS のポートは開けない（O1 以降）
+GitHub Actions ──▶ GHCR にイメージを置く                       ← VM へは接続しない
+VM ──(定期的に取りに行く)──▶ GHCR / GitHub                      ← 反映は VM からの取得方式
 プレイヤー ──▶ ゲームポート 13400〜13499 のみ公開
 Bot ──(外向きのみ)──▶ Discord
 ```
 
 - 外から VM に入れる経路は**ゲームポートだけ**にする。
-- Tailscale は個人向け無料プランで足りる見込み（要確認）。代替は Cloudflare Tunnel の SSH 機能。
+
+| 入口 | 使う道具 | 理由 | 守るためにやること |
+|---|---|---|---|
+| SSH（運営者のみ） | **Tailscale** | 設定が少ない。機器同士の直接通信で速い | Tailscale のログインに使うアカウント（Google / GitHub 等）にパスキー / MFA。接続ルール（ACL）で「運営者の機器 → VPS の 22番」だけ許可。使わなくなった機器はすぐ削除 |
+| Web 画面（Grafana、将来の管理画面） | **Cloudflare Tunnel + Access** | ブラウザだけで開ける。共同管理者の追加が許可ルールの編集だけで済む | Access の許可ルールは個別のメールアドレス / GitHub アカウント指定（「誰でも」は禁止）。セッションの有効期限を短めに |
+| 緊急用（Tailscale が使えない時） | クラウドの管理画面のコンソール接続 | 非常口 | 手順を docs/ に記載。クラウドのアカウントは MFA 必須 |
+
+- Tailscale・Cloudflare Zero Trust はどちらも無料枠で足りる見込み（範囲は要確認）。
+- どちらも Terraform で管理する（Tailscale の ACL、Cloudflare の Tunnel・Access アプリ・許可ルール）。
+- **ゲームの通信はどちらも通さない**（プレイヤーにソフトを入れてもらえないため）。
 
 ### 17.5 検知（気づく仕組み）
 
@@ -730,7 +746,7 @@ S9 の復旧訓練で、この手順を一度通して実施しておく。
 |---|---|
 | S1 | パスワードマネージャ導入、全アカウントにパスキー / MFA、GitHub の secret scanning・push protection・main 保護、予算アラート |
 | S2 | API トークンを用途別に分けて作成、state バケットのバージョニング |
-| S3 | クラウド FW はゲームポートのみ許可、SSH は Tailscale 経由（cloud-init で導入）、緊急遮断用の変数 |
+| S3 | クラウド FW はゲームポートのみ許可、SSH は Tailscale 経由（cloud-init で導入、ACL は Terraform）、緊急遮断用の変数、緊急用コンソール接続の手順書 |
 | S4 | `base` ロール: 鍵認証のみ、root ログイン禁止、fail2ban、自動更新、auditd、ログイン通知 |
 | S5 | コンテナの権限制限、イメージのダイジェスト固定、pak の sha256 固定と R2 保管 |
 | S6 | 入力検証、レート制限、docker-socket-proxy |
@@ -753,5 +769,4 @@ S9 の復旧訓練で、この手順を一度通して実施しておく。
 7. 制限値（§5）の初期案はこれでよいか
 8. 初期搭載する pak の絞り込み（容量節約のため全部は入れない、など）
 9. 手元の作業環境（Windows / Mac / Linux）→ S1 の導入手順が変わる
-10. SSH の経路: Tailscale（推奨）/ Cloudflare Tunnel / 接続元 IP 制限のどれにするか
-11. 2つ目のバックアップ先: 別アカウントのクラウドストレージ / 手元の外付けディスク
+10. 2つ目のバックアップ先: 別アカウントのクラウドストレージ / 手元の外付けディスク
