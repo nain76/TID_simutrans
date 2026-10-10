@@ -42,10 +42,16 @@ function lineRequest(line) {
 	return new Promise((resolve, reject) => {
 		const s = net.createConnection(PORT, "127.0.0.1", () => s.write(line + "\n"));
 		let buf = "";
+		// events are pushed on the same connection: wait for the answer itself
+		const answers = ["convoys", "debug_tool", "debug_save", "status", "pong", "error", "tracks", "halts", "signals"];
 		s.on("data", (d) => {
 			buf += d;
-			const i = buf.indexOf("\n");
-			if (i >= 0) { s.end(); resolve(JSON.parse(buf.slice(0, i))); }
+			let i;
+			while ((i = buf.indexOf("\n")) >= 0) {
+				const msg = JSON.parse(buf.slice(0, i));
+				buf = buf.slice(i + 1);
+				if (answers.includes(msg.type)) { s.end(); resolve(msg); return; }
+			}
 		});
 		s.on("error", reject);
 	});
@@ -85,6 +91,18 @@ try {
 	await waitFor(async () => (await getJson("/api/status")).stations.length === 1, 15000, "station created");
 	check(true, `station "${haltA.name}" created`);
 	await page.waitForSelector("#sigList button");
+	// height filter: the bridge line at x=10 (height 1) crosses the station but is not connected
+	await page.waitForSelector("#viewbar button[data-z]");
+	const layerNames = await page.$$eval("#viewbar button[data-z]", bs => bs.map(b => b.textContent));
+	check(layerNames.some(n => n.startsWith("高架")) && layerNames.some(n => n.startsWith("地上")), "height buttons: " + layerNames.join(" / "));
+	check(await page.evaluate(() => !isVisible(tileIndex.get("10,5,1")) && isVisible(tileIndex.get("10,5,0"))), "unconnected bridge line is faint, station track is visible");
+	await page.screenshot({ path: path.join(shots, "0_heights.png") });
+	await page.click("#viewbar button[data-v=connected]");
+	check(await page.evaluate(() => isVisible(tileIndex.get("10,5,1"))), "filter off: bridge line visible");
+	await page.click("#viewbar button[data-z='1']");
+	check(await page.evaluate(() => !isVisible(tileIndex.get("10,5,1")) && isVisible(tileIndex.get("10,5,0"))), "height 1 hidden by its button");
+	await page.click("#viewbar button[data-z='1']");
+	await page.click("#viewbar button[data-v=connected]");
 	const sigItem = page.locator("#sigList .item", { hasText: "(3, 5, 0)" });
 	await sigItem.locator("button").click();
 	await waitFor(async () => (await getJson("/api/status")).stations[0].signals.length === 1, 15000, "signal registered");

@@ -69,6 +69,13 @@ void il_query::get_tracks_json(cbuffer_t &buf, koord p1, koord p2)
 				if(  h.is_bound()  ) {
 					buf.printf(",\"h\":%u", h.get_id());
 				}
+				// level: underground (tunnel) or elevated (bridge), for the height filter of the panel
+				if(  gr->ist_im_tunnel()  ) {
+					buf.append(",\"u\":1");
+				}
+				else if(  gr->ist_bruecke()  ) {
+					buf.append(",\"b\":1");
+				}
 				if(  gr->has_depot()  ) {
 					buf.append(",\"d\":1");
 				}
