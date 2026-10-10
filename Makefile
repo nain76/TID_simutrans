@@ -587,6 +587,11 @@ SOURCES += simtool-scripted.cc
 SOURCES += simtool-script-generator.cc
 SOURCES += simware.cc
 SOURCES += simworld.cc
+# TID_IL H7: interlocking panel
+SOURCES += interlocking/il_bridge.cc
+SOURCES += interlocking/il_hooks.cc
+SOURCES += interlocking/il_manager.cc
+SOURCES += interlocking/il_tool.cc
 SOURCES += squirrel/sq_extensions.cc
 SOURCES += squirrel/sqstdlib/sqstdaux.cc
 SOURCES += squirrel/sqstdlib/sqstdblob.cc

@@ -42,6 +42,11 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)simtool-scripted.cc" />
     <ClCompile Include="$(MSBuildThisFileDirectory)simware.cc" />
     <ClCompile Include="$(MSBuildThisFileDirectory)simworld.cc" />
+    <!-- TID_IL H7: interlocking panel -->
+    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_bridge.cc" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_hooks.cc" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_manager.cc" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)interlocking\il_tool.cc" />
     <ClCompile Include="$(MSBuildThisFileDirectory)unicode.cc" />
     <ClCompile Include="$(MSBuildThisFileDirectory)bauer\brueckenbauer.cc" />
     <ClCompile Include="$(MSBuildThisFileDirectory)bauer\fabrikbauer.cc" />

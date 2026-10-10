@@ -63,6 +63,7 @@
 #include "../bauer/vehikelbauer.h"
 
 #include "simvehicle.h"
+#include "../interlocking/interlocking.h" // TID_IL
 #include "simroadtraffic.h"
 
 
@@ -4012,6 +4013,10 @@ bool rail_vehicle_t::is_signal_clear(uint16 next_block, sint32 &restart_speed, b
 	if(  !sig_desc->is_longblock_signal()  ) {
 		cnv->clear_reserved_tiles();
 	}
+
+#ifdef TID_INTERLOCKING // TID_IL H1: signal controlled by the interlocking panel
+	{ bool il_result; if(  interlocking_hook_signal( this, next_block, restart_speed, call_by_step, il_result )  ) { return il_result; } }
+#endif
 
 	// simple signal: fail, if next block is not free
 	if(  sig_desc->is_simple_signal()  ) {

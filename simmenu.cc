@@ -45,6 +45,7 @@
 
 #include "utils/simstring.h"
 #include "network/memory_rw.h"
+#include "interlocking/il_tool.h" // TID_IL
 
 karte_ptr_t tool_t::welt;
 
@@ -161,6 +162,7 @@ const char *tool_t::id_to_string(uint16 id)
 		CASE_TO_STRING(TOOL_ROLLUP_ALL_WIN);
 		CASE_TO_STRING(TOOL_RECOLOUR_TOOL);
 		CASE_TO_STRING(TOOL_CHANGE_FACTORY);
+		CASE_TO_STRING(TOOL_INTERLOCKING); // TID_IL H6
 		CASE_TO_STRING(UNUSED_TOOL_ADD_MESSAGE);
 		CASE_TO_STRING(UNUSED_WKZ_PWDHASH_TOOL);
 		}
@@ -341,6 +343,7 @@ tool_t *create_simple_tool(int toolnr)
 		case TOOL_MERGE_PLAYER:      tool = new tool_merge_player_t(); break;
 		case TOOL_CHANGE_HALT:       tool = new tool_change_halt_t(); break;
 		case TOOL_CHANGE_FACTORY:	 tool = new tool_change_factory_t(); break;
+		case TOOL_INTERLOCKING:      tool = new tool_interlocking_t(); break; // TID_IL H6
 		default:                    dbg->error("create_simple_tool()","cannot satisfy request for simple_tool[%i]!",toolnr);
 		                            return NULL;
 	}

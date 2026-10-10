@@ -106,6 +106,8 @@
 #include "player/ai_goods.h"
 #include "player/ai_scripted.h"
 
+#include "interlocking/interlocking.h" // TID_IL
+
 // forward declaration - management of rotation for scripting
 namespace script_api
 {
@@ -519,6 +521,9 @@ void karte_t::destroy()
 
 assert( depot_t::get_depot_list().empty() );
 
+#ifdef TID_INTERLOCKING // TID_IL H4
+	interlocking_hook_reset();
+#endif
 	DBG_MESSAGE("karte_t::destroy()", "world destroyed");
 	destroying = false;
 }
@@ -3414,6 +3419,10 @@ DBG_MESSAGE( "karte_t::rotate90()", "called" );
 
 	script_api::rotate90();
 
+#ifdef TID_INTERLOCKING // TID_IL H4
+	interlocking_hook_rotate90( cached_size.x );
+#endif
+
 	// finally recalculate schedules for goods in transit ...
 	set_schedule_counter();
 
@@ -4160,6 +4169,9 @@ void karte_t::set_schedule_counter()
 void karte_t::step()
 {
 	DBG_DEBUG4("karte_t::step", "start step");
+#ifdef TID_INTERLOCKING // TID_IL H2
+	interlocking_hook_step();
+#endif
 	uint32 time = dr_time();
 
 	// calculate delta_t before handling overflow in ticks
@@ -4940,6 +4952,9 @@ DBG_MESSAGE("karte_t::save(loadsave_t *file)", "motd filename %s", env_t::server
 		}
 	}
 
+#ifdef TID_INTERLOCKING // TID_IL H3
+	interlocking_hook_save( file );
+#endif
 	// save all open windows (upon request)
 	file->rdwr_byte( active_player_nr );
 	rdwr_all_win(file);
@@ -5540,6 +5555,9 @@ DBG_MESSAGE("karte_t::load()", "%d factories loaded", fab_list.get_count());
 		}
 	}
 
+#ifdef TID_INTERLOCKING // TID_IL H3
+	interlocking_hook_load( file );
+#endif
 	if(  file->is_version_atleast(102, 4)  ) {
 		if(  env_t::restore_UI  ) {
 			file->rdwr_byte( active_player_nr );
@@ -5553,6 +5571,9 @@ DBG_MESSAGE("karte_t::load()", "%d factories loaded", fab_list.get_count());
 	}
 
 	file->set_buffered(false);
+#ifdef TID_INTERLOCKING // TID_IL H3
+	interlocking_hook_load_finished();
+#endif
 	clear_random_mode(LOAD_RANDOM);	
 
 	// (Workaround) Sometimes, building tile placement is broken. Remove such buildings.
@@ -7486,6 +7507,9 @@ bool karte_t::interactive(uint32 quit_month)
 
 		// check events queued since our last iteration
 		eventmanager->check_events();
+#ifdef TID_INTERLOCKING // TID_IL H5
+		interlocking_hook_interactive();
+#endif
 
 		if (env_t::quit_simutrans){
 			break;
