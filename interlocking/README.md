@@ -18,6 +18,7 @@
 | `hooks.patch` / `check_hooks.sh` | 移植用のパッチと確認スクリプト |
 | `tests/` | ヘッドレスで動かす自動テスト（シナリオ `il-test`、`run_test.py`、Web 盤の `panel_test.mjs`） |
 | `tools/il_cli.py` | 手で試すための簡易コンソール盤 |
+| `tools/build_windows.sh` | Linux 上で Windows 64bit 版をクロスビルドするスクリプト（MinGW） |
 
 ## 使い方（Web 盤）
 
