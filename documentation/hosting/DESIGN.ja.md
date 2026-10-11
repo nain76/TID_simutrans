@@ -1,4 +1,4 @@
-# Simutrans OTRP サーバ間借りサービス 設計書（ドラフト v1.0）
+# Simutrans OTRP サーバ間借りサービス 設計書（ドラフト v1.1）
 
 > 目的: 「自分ではサーバを立てられない人」が、Discord から数コマンドで
 > Simutrans OTRP のマルチプレイサーバを立て、仲間と遊べるようにする。
@@ -6,7 +6,7 @@
 > 副目的: 運営者（オンプレ保守経験のみ）が、**クラウド構築・IaC（Terraform / Ansible）・AI を使った運用**を
 > 実践を通して身につける。
 
-## 0. 決定事項・方針（v1.0）
+## 0. 決定事項・方針（v1.1）
 
 | 項目 | 決定 / 方針 | 状態 |
 |---|---|---|
@@ -18,7 +18,7 @@
 | IaC | **Terraform（箱）＋ Ansible（中身）を併用する**（§12） | 決定 |
 | 運用方式 | **GitHub を唯一の正本にする（GitOps）**。サーバへの手作業変更は禁止（§13） | 決定 |
 | 予算 | **月 ¥5,000 程度**（Claude の有料プランは別枠） | 決定 |
-| インフラ | Terraform で VM ごと作れるサービスから選ぶ。候補は Vultr（東京）/ さくらのクラウド（§4） | **未決** |
+| インフラ | **Vultr 東京リージョン**（4GB 級。具体的なプランは S3 で確定）（§4） | 決定 |
 | サーバ OS | Linux（Ubuntu 24.04 LTS を想定） | 決定 |
 | 手元の作業 PC | Windows + **WSL2（Ubuntu）**で Terraform / Ansible を実行 | 決定 |
 | 操作 UI | **Discord Bot を主にする**。Web は作らない（必要になったら後から追加） | 決定 |
@@ -602,6 +602,47 @@ S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → [公開] → S10
 
 ---
 
+### 15.4 S1 の作業チェックリスト
+
+S1 では**サーバは1台も作らない**。アカウント・道具・リポジトリを安全な状態で揃えるだけ。費用はドメイン代（年額）のみ。
+
+**A. パスワードマネージャ（最初に行う）**
+- [ ] パスワードマネージャを用意する（Bitwarden / 1Password など）。以降のパスワード・リカバリーコードはすべてここに保存
+- [ ] Windows のログインと PC 本体の暗号化（BitLocker）を確認
+
+**B. アカウント作成と保護**（すべてパスキー or MFA、リカバリーコードを保存）
+
+| サービス | S1 でやること | 本格的に使う段階 |
+|---|---|---|
+| GitHub | MFA（パスキー）を有効化 | S1 |
+| Cloudflare | アカウント作成・MFA、**ドメイン取得（Registrar）** | S2 |
+| Vultr | アカウント作成・MFA、支払い方法の登録、利用額の通知 / 上限の設定（機能は要確認） | S3 |
+| AWS | アカウント作成、root に MFA、普段用の IAM Identity Center ユーザー作成、**AWS Budgets（例: 月 $5 で通知）** | S7〜S8（S3 バックアップ） |
+| Tailscale | アカウント作成（ログインに使う GitHub / Google 側の MFA を確認） | S3 |
+| Discord | 自分のアカウントの MFA、専用サーバ（ギルド）の作成 | S6 |
+
+**C. GitHub リポジトリ `simutrans-hosting`（公開）**
+- [ ] リポジトリを作成（README・ライセンス・`.gitignore`）
+- [ ] Settings → Code security: **secret scanning・push protection・Dependabot alerts** を有効化
+- [ ] main ブランチのルール: PR 必須、force push 禁止、（S8 以降）CI 合格必須
+- [ ] この設計書を `docs/DESIGN.ja.md` として移し、`CLAUDE.md` / `AGENTS.md` を追加（Claude Code が PR で作成）
+
+**D. 手元 PC（Windows）の作業環境**
+- [ ] WSL2 + Ubuntu 24.04 を導入（`wsl --install -d Ubuntu-24.04`）
+- [ ] Windows Terminal、VS Code + WSL 拡張
+- [ ] WSL 内に git / Terraform（HashiCorp 公式 apt リポジトリ）/ Ansible・ansible-lint（pipx）/ Python 3 を導入
+- [ ] git の名前・メールを設定、GitHub へは SSH 鍵 or `gh auth login` で接続
+- [ ] SSH 鍵を作成（`ssh-keygen -t ed25519`、**パスフレーズ必須**）。鍵とパスフレーズの控えをパスワードマネージャへ
+- [ ] Simutrans OTRP クライアント（Windows 版）を導入（S5 の接続確認用）
+
+**E. 完了条件**
+- [ ] すべてのサービスに MFA 付きでログインできる
+- [ ] WSL で `terraform -version` / `ansible --version` / `git --version` が動く
+- [ ] `simutrans-hosting` が公開され、保護設定が有効になっている
+- [ ] ドメインを取得し、Cloudflare の DNS で管理されている（S2 の準備）
+
+**役割分担**: アカウント作成・支払い・MFA は**本人のみ**が行う（AI に任せない）。リポジトリの初期ファイル・手順書の作成は Claude Code が PR で行う。
+
 ## 16. ツール・契約・担当一覧
 
 ※ 料金はすべて目安。契約前に公式サイトで要確認。
@@ -790,12 +831,12 @@ S9 の復旧訓練で、この手順を一度通して実施しておく。
 
 ---
 
-## 18. 決定事項の一覧（v0.9 時点）
+## 18. 決定事項の一覧（v1.1 時点・すべて決定）
 
 | # | 項目 | 結果 | 状態 |
 |---|---|---|---|
 | 1 | 予算 | 月 ¥5,000 程度（Claude の有料プランは別枠） | 決定 |
-| 2 | インフラ | Vultr 東京 / さくらのクラウド / Oracle Free から選ぶ | **未決** |
+| 2 | インフラ | Vultr 東京リージョン（4GB 級） | 決定 |
 | 3 | 操作 UI | Discord Bot | 決定 |
 | 4 | 言語 | Python | 決定 |
 | 5 | リポジトリ | `simutrans-hosting`・公開・個人アカウント | 決定 |
