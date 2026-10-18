@@ -17,7 +17,7 @@ function el(name, attrs, parent) {
 // lost, which made levers feel slow on touch screens (a tap lasts longer than a mouse click).
 let pressHeld = 0, pressUntil = 0, renderLater = null;
 document.addEventListener("pointerdown", (e) => {
-	if (cpEdit || !e.target.closest || !e.target.closest("button, .rlever, .clickable, select")) return;
+	if (cpEdit || !e.target.closest || !e.target.closest("button, .rlever, .clickable, select, #map")) return;
 	pressHeld = performance.now();
 }, true);
 const pressDone = () => { if (pressHeld) { pressHeld = 0; pressUntil = performance.now() + 150; } };

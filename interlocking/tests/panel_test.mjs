@@ -315,7 +315,11 @@ try {
 	}), "a tap on a lever is not lost by the panel being drawn anew meanwhile");
 	await sleep(400);
 	// signal lever 1 (S1, eastbound): turn to the right, then press the destination button
-	await page.click("#relayBoard .rlever[data-sl='3,5,0'] [data-side=R]");
+	// shown turned at once, before the game's answer (in a network game it takes a while)
+	check(await page.evaluate(() => {
+		document.querySelector("#relayBoard .rlever[data-sl='3,5,0'] [data-side=R]").click();
+		return document.querySelector("#relayBoard .rlever[data-sl='3,5,0']").textContent.includes("着点を押す");
+	}), "the lever is shown turned at once (before the game answers)");
 	await waitFor(async () => ((await stA()).slevers || []).some(l => l.pos.join(",") === "3,5,0" && l.side === "R"), 10000, "lever turned");
 	check(true, "signal lever 1 turned to the right (stored in the game)");
 	await sleep(800);

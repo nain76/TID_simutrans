@@ -147,6 +147,18 @@ async function api(path) {
 	if (!r.ok) throw new Error(path + " " + r.status);
 	return r.json();
 }
+// a lever just pressed is shown at once, until the game's state says the same (or the game refused, or 5 s
+// passed): the game answers only after a moment (longer in a network game), and a lever that did not move
+// at once looked as if the click was lost and was pressed again
+const shownAhead = new Map();   // key -> { value, cmd, until }
+function showAhead(k, value, cmd) { shownAhead.set(k, { value: value || null, cmd, until: performance.now() + 5000 }); }
+function ahead(k, actual) {
+	const a = shownAhead.get(k);
+	if (!a) return actual;
+	if (performance.now() > a.until || (actual || null) === a.value) { shownAhead.delete(k); return actual; }
+	return a.value;
+}
+
 async function command(cmd, label) {
 	pending.set(cmd, label || cmd);
 	render();
@@ -180,6 +192,7 @@ function handleEvent(ev) {
 	if (ev.type === "result") {
 		const label = pending.get(ev.command) || ev.command;
 		pending.delete(ev.command);
+		if (!ev.ok) for (const [k, a] of shownAhead) if (a.cmd === ev.command) shownAhead.delete(k);
 		waiters = waiters.filter(w => { if (w.cmd === ev.command) { w.resolve(ev); return false; } return true; });
 		log((ev.ok ? "OK  " : "NG  ") + label + (ev.ok ? "" : " … " + tr(ev.error)), ev.ok ? "ok" : "err");
 		if (!ev.ok && !ev.command.startsWith("rt_def") && !ev.command.startsWith("rt_path")) toast(tr(ev.error));

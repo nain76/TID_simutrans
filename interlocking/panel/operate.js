@@ -10,6 +10,11 @@ function pointLevers() {
 	const st = station();
 	const o = {};
 	for (const lv of (st && st.levers) || []) o[key(lv.pos)] = lv.value;
+	// a point lever just thrown (shown before the game's answer)
+	for (const k of [...shownAhead.keys()]) if (k.startsWith("pt:")) {
+		const v = ahead(k, o[k.slice(3)]);
+		if (v) o[k.slice(3)] = v; else delete o[k.slice(3)];
+	}
 	return o;
 }
 const activeRoutes = () => status.routes.filter(r => r.state !== "idle");
@@ -62,7 +67,9 @@ function setLever(li, pos) {
 		const prs = allowedPairs(pt, pos) || [];
 		return `${pt.t.p.join(":")}/${pos || ""}/${prs.map(p => p.join("-")).join(".")}`;
 	}).join(";");
-	command(`pt_set,${st.id},${spec}`, `${leverName(st, li)} ${posName(pos)}`);
+	const c = `pt_set,${st.id},${spec}`;
+	for (const i of layout.levers[li].pts) showAhead("pt:" + key(layout.points[i].t.p), pos || null, c);
+	command(c, `${leverName(st, li)} ${posName(pos)}`);
 }
 
 /*

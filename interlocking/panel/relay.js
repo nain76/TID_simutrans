@@ -107,7 +107,12 @@ function leverOfPos(st, pos) {
 	return { lever: { no: "", shunt: false }, side: null };
 }
 // the turned lever at a start point: the signal lever, or (sh) its shunting lever
-const sleverOf = (st, pos, sh = false) => (st.slevers || []).find(l => key(l.pos) === key(pos) && !!l.shunt === !!sh);
+function sleverOf(st, pos, sh = false) {
+	const real = (st.slevers || []).find(l => key(l.pos) === key(pos) && !!l.shunt === !!sh);
+	const side = ahead("sl:" + leverKey(pos, sh), real ? real.side : null);
+	if (side === (real ? real.side : null)) return real;
+	return side ? { pos, side, shunt: sh, used: false } : null;
+}
 const leverKey = (pos, sh) => key(pos) + (sh ? "|S" : "");
 
 // operating areas (扱い区分): the area of a start point or point (0 = common), and the area this browser operates
@@ -231,7 +236,9 @@ function turnSignalLever(pos, side, sh = false) {
 	const want = side || (lv ? "N" : leverSide(st, pos));
 	if (want !== "N" && want !== leverSide(st, pos)) { toast("このてこは反対側には開通しません", true); return; }
 	if (want !== "N") relaySel = leverKey(pos, sh);
-	command(`sl_turn,${st.id},${pos.join(",")},${want}${sh ? ",S" : ""}`, `${signalLabel(st, pos)}${sh ? " 入換" : ""} てこ ${want === "N" ? "定位" : want === "L" ? "左反位" : "右反位"}`);
+	const c = `sl_turn,${st.id},${pos.join(",")},${want}${sh ? ",S" : ""}`;
+	showAhead("sl:" + leverKey(pos, sh), want === "N" ? null : want, c);
+	command(c, `${signalLabel(st, pos)}${sh ? " 入換" : ""} てこ ${want === "N" ? "定位" : want === "L" ? "左反位" : "右反位"}`);
 }
 
 // actual position of a point (from the game): "N", "R", "X" (other pair) or null (unknown)
