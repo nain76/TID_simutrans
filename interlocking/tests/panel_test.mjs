@@ -151,6 +151,11 @@ try {
 	// exits: a platform end without departure signal -> virtual departure signal
 	const exitRows = await page.$$eval("#exitList .check", cs => cs.map(c => c.textContent));
 	check(exitRows.length >= 2 && exitRows.every(t => t.includes("番線")), "exit rows per platform end: " + exitRows.length);
+	const exitHint = await page.textContent("#exitList");
+	check(/ホームの線路：\d+本/.test(exitHint), "the number of platform tracks is shown: " + (exitHint.match(/ホームの線路：\d+本/) || [""])[0]);
+	const others = await page.$$eval("#exitList details.more .check", cs => cs.map(c => c.querySelector(".head").textContent + " " + c.querySelector(".msg").textContent));
+	check(others.every(t => t.includes("出られない")) && await page.locator("#exitList details.more button", { hasText: "仮想出発信号にする" }).count() === others.length,
+		`ends trains seem not to leave by are listed apart, with the button (${others.length}): ${others.join(" / ")}`);
 	await page.locator("#exitList button", { hasText: "仮想出発信号にする" }).first().click();
 	await waitFor(async () => (await getJson("/api/status")).stations[0].departures.length === 1, 15000, "virtual departure registered");
 	await page.waitForFunction(() => [...document.querySelectorAll("#exitList .check.ok")].some(c => c.textContent.includes("仮想出発信号")), null, { timeout: 15000 });

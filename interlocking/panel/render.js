@@ -526,6 +526,7 @@ function hoverSignalOn(elements, keyOf) {
 		e.addEventListener("mouseleave", () => { hoverSignal = null; renderMap(); });
 	}
 }
+let exitMoreOpen = false;  // the list of platform ends trains seem not to leave by is open
 function renderChecks(st) {
 	const el1 = document.getElementById("entryList"), el2 = document.getElementById("exitList");
 	if (!st) { el1.innerHTML = el2.innerHTML = `<span class="hint">先に連動駅を作成してください</span>`; el1.dataset.html = el2.dataset.html = ""; return; }
@@ -544,7 +545,7 @@ function renderChecks(st) {
 		return `<div class="check ${cls}" data-prev="${e.ex.tiles.join(";")}"><div class="head"><b>${title}</b></div><div class="msg">${msg}</div><div class="acts">${acts}</div></div>`;
 	}).join("") || `<span class="hint">外から入ってくる線路は見つかりませんでした。</span>`;
 
-	const html2 = exs.map(x => {
+	const exitRow = (x) => {
 		const title = `${x.group + 1}番線 ${dirName(x.dir)}側` + (x.deadEnd ? `<span class="tag">行き止まり</span>` : "");
 		let cls, msg, acts = "";
 		const depBtn = x.dep ? `<button data-depdel="${key(x.end.p)}">仮想出発信号を解除</button>` : `<button data-depadd="${key(x.end.p)}">仮想出発信号にする</button>`;
@@ -552,13 +553,25 @@ function renderChecks(st) {
 		else if (x.registered.length) { cls = "ok"; msg = "✔ 出発信号 " + x.registered.map(t => signalLabel(st, t.p)).join("・") + " で管理しています"; acts = x.registered.map(t => sigBtn(t, true)).join(""); }
 		else if (x.unregistered.length && !x.ex.targets.length) { cls = "warn"; msg = "⚠ 出発信号が未登録です。信号を登録するか、仮想出発信号にしてください。"; acts = x.unregistered.map(t => sigBtn(t, false)).join("") + depBtn; }
 		else { cls = "warn"; msg = "⚠ 出発信号がありません。仮想出発信号にしてください。"; acts = depBtn; }
+		if (x.oneway && !x.dep) {
+			cls = "";
+			msg = "この向きには出られないと判定しました" + (x.ex.blocked.length ? `（逆向きの信号 ${x.ex.blocked.map(pos).join("・")} があるため）` : "（先が留置線・車庫だけ、または行き止まり）") + "。実際に列車がこちらへ出ていくなら、仮想出発信号にできます。";
+			acts = depBtn;
+		}
 		return `<div class="check ${cls}" data-prev="${x.ex.tiles.concat([key(x.end.p)]).join(";")}"><div class="head"><b>${title}</b></div><div class="msg">${msg}</div><div class="acts">${acts}</div></div>`;
-	}).join("") || `<span class="hint">番線が見つかりませんでした。</span>`;
+	};
+	const shownExits = exs.filter(x => !x.oneway || x.dep), otherExits = exs.filter(x => x.oneway && !x.dep);
+	const groupCount = platformGroups(stationHalt(currentArea())).length;
+	const html2 = (shownExits.map(exitRow).join("") || `<span class="hint">番線が見つかりませんでした。</span>`)
+		+ (otherExits.length ? `<details class="more" ${exitMoreOpen ? "open" : ""}><summary>出られないと判定した番線の端（${otherExits.length}）</summary>${otherExits.map(exitRow).join("")}</details>` : "")
+		+ `<p class="hint">この駅のホームの線路：${groupCount}本</p>`;
 
 	if (el1.dataset.html === html1 && el2.dataset.html === html2) return;
 	el1.innerHTML = el1.dataset.html = html1;
 	el2.innerHTML = el2.dataset.html = html2;
 	checkPreview = null;
+	const more = el2.querySelector("details.more");
+	if (more) more.addEventListener("toggle", () => { exitMoreOpen = more.open; });
 	for (const c of document.querySelectorAll("#entryList .check, #exitList .check")) {
 		c.addEventListener("mouseenter", () => { checkPreview = new Set(c.dataset.prev.split(";")); renderMap(); });
 		c.addEventListener("mouseleave", () => { checkPreview = null; renderMap(); });

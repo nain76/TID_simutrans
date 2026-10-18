@@ -230,7 +230,7 @@ const dirName = (d) => { const i = DIRS.indexOf(d); return i < 0 ? "" : ["北", 
  * and stops at every signal (recorded) and at target tiles (recorded); returns also all tiles seen.
  */
 function explore(start, dir, isTarget, isStop) {
-	const signals = [], targets = [], seen = new Set(), tiles = new Set();
+	const signals = [], targets = [], blocked = [], seen = new Set(), tiles = new Set();
 	const q = [[start, dir]];
 	while (q.length) {
 		const [t, d] = q.shift();
@@ -241,6 +241,7 @@ function explore(start, dir, isTarget, isStop) {
 		if (t.s) {
 			// a signal counts only if the train may pass it in this direction (one-way signals block the other)
 			if (!d || (t.m & d)) { if (!signals.includes(t)) signals.push(t); }
+			else if (!blocked.includes(t)) blocked.push(t);
 			continue;
 		}
 		if (isTarget(t)) { if (!targets.includes(t)) targets.push(t); continue; }
@@ -252,7 +253,7 @@ function explore(start, dir, isTarget, isStop) {
 			if (n) q.push([n, e]);
 		}
 	}
-	return { signals, targets, tiles: [...tiles] };
+	return { signals, targets, blocked, tiles: [...tiles] };
 }
 
 // entrances: track edges where a train can come from outside the area into it
@@ -302,9 +303,11 @@ function areaExits(st) {
 				const n = neighbour(t, d);
 				if (!n || inGroup.has(key(n.p))) continue;
 				const ex = explore(n, d, (x) => !stationTiles.has(key(x.p)) || (x.h && x.h !== halt && !sidingHaltIds().has(x.h)), (x) => x.h === halt);
-				if (!ex.signals.length && !ex.targets.length) continue; // trains cannot leave this way (one-way)
 				const dep = (st.departures || []).find(x => key(x.pos) === key(t.p));
-				res.push({ group: gi, end: t, dir: d, deadEnd, ex, dep, registered: ex.signals.filter(reg), unregistered: ex.signals.filter(x => !reg(x)) });
+				// trains cannot leave this way (one-way signal, or only sidings and depots): still listed apart,
+				// the check may be wrong for a layout it does not know (a virtual signal can be set anyway)
+				const oneway = !ex.signals.length && !ex.targets.length;
+				res.push({ group: gi, end: t, dir: d, deadEnd, ex, dep, oneway, registered: ex.signals.filter(reg), unregistered: ex.signals.filter(x => !reg(x)) });
 			}
 		}
 	});
