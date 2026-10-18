@@ -178,7 +178,7 @@ function renderMap() {
 			el("text", { x: cx(t.p), y: cy(t.p) + 4, "font-size": 11 * sc, "text-anchor": "middle", fill: "#e6e9ee" }, g).textContent = "車";
 		}
 		// a click target for creating routes by hand
-		const hit = el("rect", { x: cx(t.p) - CELL / 2, y: cy(t.p) - CELL / 2, width: CELL, height: CELL, fill: "transparent", class: manualRoute ? "clickable" : "" }, g);
+		const hit = el("rect", { x: cx(t.p) - CELL / 2, y: cy(t.p) - CELL / 2, width: CELL, height: CELL, fill: "transparent", class: manualRoute || depTool ? "clickable" : "" }, g);
 		hit.addEventListener("click", () => tileClicked(t));
 		hit.appendChild(el("title", {})).textContent = `(${t.p.join(", ")}) ${layerName(t.p[2])}` + (t.c ? " " + (tracks.convoys[t.c] || "") : "");
 	}
@@ -290,8 +290,9 @@ function renderMap() {
 		}
 		const x = cx(t.p), y = cy(t.p), r = 7 * sc;
 		block(x - r, y - r, x + r, y + r, 3);
-		const grp = el("g", { class: (tab === "run" ? "clickable" : "") + (mayHandle(st, d.pos) ? "" : " other") }, g);
-		if (tab === "run") grp.addEventListener("click", (e) => { e.stopPropagation(); startClicked(d.pos, true); });
+		const grp = el("g", { class: (tab === "run" || depTool ? "clickable" : "") + (mayHandle(st, d.pos) ? "" : " other") }, g);
+		if (depTool) grp.addEventListener("click", (e) => { e.stopPropagation(); depToolClicked(d.pos); });
+		else if (tab === "run") grp.addEventListener("click", (e) => { e.stopPropagation(); startClicked(d.pos, true); });
 		if (d.shunt) {
 			// virtual shunting signal: a diamond (lit white when a route is set)
 			el("path", { d: `M${x} ${y - r * 1.25} L${x + r * 1.25} ${y} L${x} ${y + r * 1.25} L${x - r * 1.25} ${y} Z`, fill: clear ? "#f4f4f4" : "var(--red)", stroke: "#fff", "stroke-width": 2 }, grp);
@@ -742,4 +743,11 @@ function renderSetup() {
 		(manualRoute.start ? "着点の線路（番線の端など）をクリックしてください。（Esc で中止）" : "始点のてこ扱い信号をクリックしてください。（Esc で中止）") :
 		"自動作成: 各てこ扱い信号から各番線・留置線へ、出発信号から区域の出口への進路を作ります。手で作る: 始点の信号 → 着点の線路の順にクリックします。";
 	document.getElementById("btnManualRoute").textContent = manualRoute ? "中止" : "手で作る";
+	for (const b of document.querySelectorAll("[data-deptool]")) b.classList.toggle("on", depTool === b.dataset.deptool);
+	const dh = document.getElementById("depToolHint");
+	const dt = depTool === "del" ? "外す仮想信号（または、その線路のタイル）を地図でクリックしてください。（もう一度ボタンか Esc でやめる）" :
+		depTool ? `${depTool === "S" ? "仮想入換信号" : "仮想出発信号"}を置く、列車が出ていく側の端のタイルを地図でクリックしてください（ホーム、またはポイント・信号のない線路）。続けて置けます。（もう一度ボタンか Esc でやめる）` : null;
+	if (dt) dh.textContent = dt;
+	else if (dh.dataset.base && dh.innerHTML !== dh.dataset.base) dh.innerHTML = dh.dataset.base;
+	if (!dh.dataset.base && !dt) dh.dataset.base = dh.innerHTML;
 }

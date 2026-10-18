@@ -164,6 +164,19 @@ try {
 	await page.locator("#exitList button", { hasText: "仮想出発信号を解除" }).first().click();
 	await waitFor(async () => (await getJson("/api/status")).stations[0].departures.length === 0, 15000, "virtual departure removed");
 	check(true, "virtual departure signal removed again");
+	// by hand: a virtual shunting signal on a chosen tile, and removed again
+	const clickTile = (p) => page.evaluate((p) => [...document.querySelectorAll("#map rect")].find(r => r.querySelector("title") && r.querySelector("title").textContent.startsWith(`(${p})`)).dispatchEvent(new MouseEvent("click", { bubbles: true })), p);
+	await page.click("[data-deptool=S]");
+	check((await page.textContent("#depToolHint")).includes("クリック"), "placing by hand: the hint says what to click");
+	await clickTile("5, 8, 0");
+	await waitFor(async () => (await getJson("/api/status")).stations[0].departures.some(d => d.shunt && d.pos.join(",") === "5,7,0"), 15000, "placed by hand");
+	check(true, "a virtual shunting signal placed by hand on the siding (its end at (5,7))");
+	await page.click("[data-deptool=del]");
+	await clickTile("5, 8, 0");
+	await waitFor(async () => (await getJson("/api/status")).stations[0].departures.length === 0, 15000, "removed by hand");
+	check(true, "removed by hand");
+	await page.keyboard.press("Escape");
+	check(await page.locator("[data-deptool].on").count() === 0, "Esc ends placing");
 	// siding (5,7)-(5,8): virtual shunting signal
 	const sidRows = await page.$$eval("#sidingList .check[data-prev]", cs => cs.map(c => c.textContent));
 	check(sidRows.length === 1 && sidRows[0].includes("留置1") && sidRows[0].includes("行き止まり"), "siding found: " + sidRows.join(" / "));

@@ -37,7 +37,24 @@ function toggleSignal(t, on) {
 	command(`${on ? "sig_del" : "sig_add"},${st.id},${t.p.join(",")}`, `${on ? "解除" : "登録"} 信号(${t.p.join(",")})`);
 }
 
+// placing virtual signals by hand: null, "D" (departure), "S" (shunting) or "del"
+let depTool = null;
+function depToolClicked(pos) {
+	const st = station();
+	if (!st || !depTool) return false;
+	const p = pos.join(",");
+	if (depTool === "del") command(`dep_del,${st.id},${p}`, `仮想信号を外す (${p})`);
+	else command(`dep_add,${st.id},${p},${depTool}`, `${depTool === "S" ? "仮想入換信号" : "仮想出発信号"}を置く (${p})`);
+	return true;
+}
+for (const b of document.querySelectorAll("[data-deptool]")) b.addEventListener("click", () => {
+	depTool = depTool === b.dataset.deptool ? null : b.dataset.deptool;
+	manualRoute = null;
+	render();
+});
+
 async function tileClicked(t) {
+	if (depToolClicked(t.p)) return;
 	if (!manualRoute || !manualRoute.start) return;
 	const st = station();
 	const start = manualRoute.start;
@@ -203,6 +220,7 @@ for (const b of document.querySelectorAll("nav button")) b.addEventListener("cli
 	for (const x of document.querySelectorAll("nav button")) x.classList.toggle("on", x === b);
 	for (const s of ["run", "setup", "log"]) document.getElementById("tab-" + s).hidden = s !== tab;
 	manualRoute = null;
+	depTool = null;
 	if (tab === "setup") { try { halts = (await api("/api/halts")).halts; info = await api("/api/info"); } catch (e) {} }
 	render();
 });
@@ -230,6 +248,7 @@ document.getElementById("btnAreaFit").addEventListener("click", () => {
 document.getElementById("btnAutoRoutes").addEventListener("click", autoRoutes);
 document.getElementById("btnManualRoute").addEventListener("click", () => {
 	manualRoute = manualRoute ? null : { start: null };
+	depTool = null;
 	render();
 });
 document.getElementById("btnDelStation").addEventListener("click", () => {
@@ -242,7 +261,7 @@ document.getElementById("mapwrap").addEventListener("wheel", (e) => {
 	e.preventDefault();
 	setZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
 }, { passive: false });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && manualRoute) { manualRoute = null; render(); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && (manualRoute || depTool)) { manualRoute = null; depTool = null; render(); } });
 
 (async () => {
 	try { halts = (await api("/api/halts")).halts; info = await api("/api/info"); } catch (e) {}
