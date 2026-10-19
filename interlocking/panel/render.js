@@ -370,6 +370,18 @@ function renderMap() {
 
 	function placeLabels() {
 		const area = (r, o) => Math.max(0, Math.min(r[2], o[2]) - Math.max(r[0], o[0])) * Math.max(0, Math.min(r[3], o[3]) - Math.max(r[1], o[1]));
+		// the obstacles in a grid: a candidate place is compared with the obstacles near it only
+		// (a large station has thousands of them)
+		const G = 64, grid = new Map();
+		const cells = (r, fn) => { for (let gx = Math.floor(r[0] / G); gx <= Math.floor(r[2] / G); gx++) for (let gy = Math.floor(r[1] / G); gy <= Math.floor(r[3] / G); gy++) fn(gx + "," + gy); };
+		const addObstacle = (o) => cells(o, (k) => { if (!grid.has(k)) grid.set(k, []); grid.get(k).push(o); });
+		for (const o of obstacles) addObstacle(o);
+		const scoreOf = (r) => {
+			const seen = new Set();
+			let s = 0;
+			cells(r, (k) => { for (const o of grid.get(k) || []) if (!seen.has(o)) { seen.add(o); s += area(r, o) * o[4]; } });
+			return s;
+		};
 		for (const L of labelQueue) {
 			const fs = L.attrs["font-size"] || 11;
 			const pad = L.plate ? 5 : 0;
@@ -379,13 +391,15 @@ function renderMap() {
 			let best = null, bestScore = Infinity;
 			for (const [ox, oy] of cands) {
 				const r = [L.x + ox - w / 2, L.y + oy - h / 2, L.x + ox + w / 2, L.y + oy + h / 2];
-				const score = obstacles.reduce((s, o) => s + area(r, o) * o[4], 0);
+				const score = scoreOf(r);
 				if (score < bestScore) { bestScore = score; best = r; }
 				if (score === 0) break;
 			}
 			if (L.plate) el("rect", { x: best[0], y: best[1], width: best[2] - best[0], height: best[3] - best[1], rx: 3, fill: L.plate.fill, stroke: L.plate.stroke }, L.parent);
 			el("text", Object.assign({ x: (best[0] + best[2]) / 2, y: best[3] - (h - pad) * .25 - pad / 2, "text-anchor": "middle", "pointer-events": "none" }, L.attrs), L.parent).textContent = L.text;
-			obstacles.push([best[0], best[1], best[2], best[3], 4]);
+			const o = [best[0], best[1], best[2], best[3], 4];
+			obstacles.push(o);
+			addObstacle(o);
 		}
 	}
 }
@@ -441,6 +455,7 @@ function renderRun() {
 	const actHtml = mine.map(r => `<button class="lever" data-active="${r.id}"><span><span class="name">${esc(r.name)}</span></span>${r.state === "releasing" ? `<span class="chip set blink">時素 ${r.release_in}秒</span>` : r.state === "set" && r.waiting ? `<span class="chip set">${st.all_stop ? "一斉停止中" : "転換中"}</span>` : r.state === "set" ? `<span class="chip set">${isRelay() ? "設定" : "設定（押すと取消）"}</span>` : `<span class="chip occupied">進入</span>`}</button>`).join("") || `<span class="hint">ありません</span>`;
 	if (act.dataset.html !== actHtml) {
 		act.innerHTML = act.dataset.html = actHtml;
+		if (hoverRoute && mine.some(x => x.id === hoverRoute.id)) hoverRoute = null;
 		for (const b of act.querySelectorAll("[data-active]")) {
 			const r = mine.find(x => x.id === Number(b.dataset.active));
 			b.addEventListener("click", () => leverClicked(r));
@@ -497,13 +512,20 @@ function renderRun() {
 		html += `</div>`;
 	}
 	if (selectedSignal && !groups.has(selectedSignal)) selectedSignal = null;
-	lv.innerHTML = html || `<span class="hint">登録済みの進路はありません（設定タブの「進路を自動作成」で作れます）。</span>`;
+	html = html || `<span class="hint">登録済みの進路はありません（設定タブの「進路を自動作成」で作れます）。</span>`;
+	// drawn again only when it changed (a button replaced under the mouse would keep its route highlighted)
+	const lvKey = (selectedSignal || "") + "|" + html;
+	if (lv.dataset.html !== lvKey) {
+	lv.innerHTML = html;
+	lv.dataset.html = lvKey;
+	if (hoverRoute && routes.some(x => x.id === hoverRoute.id)) hoverRoute = null;
 	for (const b of lv.querySelectorAll(".lever")) {
 		const r = routes.find(x => x.id === Number(b.dataset.route));
 		b.addEventListener("click", () => leverClicked(r));
 		b.addEventListener("mouseenter", () => { hoverRoute = r; renderMap(); });
 		b.addEventListener("mouseleave", () => { hoverRoute = null; renderMap(); });
 		if (selectedSignal && key(r.start) !== selectedSignal) b.style.opacity = .4;
+	}
 	}
 	if (isRelay()) {
 		renderRelayBoard();
@@ -527,11 +549,15 @@ function hoverSignalOn(elements, keyOf) {
 		e.addEventListener("mouseleave", () => { hoverSignal = null; renderMap(); });
 	}
 }
+let checksMemo = { sig: null };
 let exitMoreOpen = false;  // the list of platform ends trains seem not to leave by is open
 function renderChecks(st) {
 	const el1 = document.getElementById("entryList"), el2 = document.getElementById("exitList");
 	if (!st) { el1.innerHTML = el2.innerHTML = `<span class="hint">先に連動駅を作成してください</span>`; el1.dataset.html = el2.dataset.html = ""; return; }
-	const ents = areaEntrances(st), exs = areaExits(st);
+	// worked out again only when the tracks or the station's signals change (not every 0.6 s)
+	const sig = tracksSig + "|" + JSON.stringify([st.id, st.signals.map(s => s.pos), st.departures, st.siding_halts, currentArea(), stationTiles ? stationTiles.size : 0]);
+	if (checksMemo.sig !== sig) checksMemo = { sig, ents: areaEntrances(st), exs: areaExits(st) };
+	const ents = checksMemo.ents, exs = checksMemo.exs;
 	if (!ents) { el1.innerHTML = el2.innerHTML = `<span class="hint">駅のホームが表示範囲に見つかりません。「駅に合わせる」を押してください。</span>`; el1.dataset.html = el2.dataset.html = ""; return; }
 	const pos = (t) => `(${t.p[0]}, ${t.p[1]})`;
 	const sigBtn = (t, on) => `<button data-sigtoggle="${key(t.p)}">${on ? "解除" : "登録"}：信号 ${pos(t)}</button>`;
@@ -725,7 +751,10 @@ function renderSetup() {
 	// routes
 	const rl = document.getElementById("routeList");
 	const routes = st ? status.routes.filter(r => r.station === st.id) : [];
-	rl.innerHTML = routes.map(r => `<div class="item" data-route="${r.id}"><span>${esc(r.name)} <span class="hint">${r.tiles.length}マス</span></span><span><button data-ren="${r.id}">名前</button><button data-del="${r.id}">削除</button></span></div>`).join("") || `<span class="hint">進路はまだありません</span>`;
+	const rlHtml = routes.map(r => `<div class="item" data-route="${r.id}"><span>${esc(r.name)} <span class="hint">${r.tiles.length}マス</span></span><span><button data-ren="${r.id}">名前</button><button data-del="${r.id}">削除</button></span></div>`).join("") || `<span class="hint">進路はまだありません</span>`;
+	if (rl.dataset.html !== rlHtml) {
+	rl.innerHTML = rl.dataset.html = rlHtml;
+	if (hoverRoute && hoverRoute.station === (st && st.id)) hoverRoute = null;
 	for (const it of rl.querySelectorAll(".item")) {
 		const r = routes.find(x => x.id === Number(it.dataset.route));
 		it.addEventListener("mouseenter", () => { hoverRoute = r; renderMap(); });
@@ -741,6 +770,7 @@ function renderSetup() {
 		const r = routes.find(x => x.id === Number(b.dataset.del));
 		if (confirm(`進路「${r.name}」を削除しますか？`)) command("rt_del," + r.id, "進路の削除 " + r.name);
 	});
+	}
 	document.getElementById("routeHint").textContent = manualRoute ?
 		(manualRoute.start ? "着点の線路（番線の端など）をクリックしてください。（Esc で中止）" : "始点のてこ扱い信号をクリックしてください。（Esc で中止）") :
 		"自動作成: 各てこ扱い信号から各番線・留置線へ、出発信号から区域の出口への進路を作ります。手で作る: 始点の信号 → 着点の線路の順にクリックします。";

@@ -250,6 +250,10 @@ document.getElementById("btnArea").addEventListener("click", () => {
 	const st = station();
 	if (!st) return;
 	const v = (id) => Number(document.getElementById(id).value);
+	if (!["ax1", "ax2", "ay1", "ay2"].every(id => document.getElementById(id).value.trim() !== "" && Number.isInteger(v(id)) && v(id) >= 0)) {
+		toast("範囲は 0 以上の整数で 4 つとも入れてください", true);
+		return;
+	}
 	const old = areaOf(st.id) || {};
 	setArea(st.id, { x1: Math.min(v("ax1"), v("ax2")), x2: Math.max(v("ax1"), v("ax2")), y1: Math.min(v("ay1"), v("ay2")), y2: Math.max(v("ay1"), v("ay2")), halt: old.halt });
 	refreshTracks().then(render);

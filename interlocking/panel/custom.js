@@ -670,8 +670,11 @@ function importPanel() {
 		try {
 			const d = JSON.parse(await f.text());
 			if (d.format !== "tid-custom-panel" || !Array.isArray(d.parts)) throw new Error("カスタム盤のファイルではありません");
-			const parts = d.parts.filter(p => p && "TSPDHLAFCKY".includes(p.t)).map(p => ({ t: p.t, x1: p.x1 | 0, y1: p.y1 | 0, x2: p.x2 | 0, y2: p.y2 | 0, f: p.f | 0,
-				b: (p.b || []).filter(x => Array.isArray(x) && x.length === 3).map(x => x.map(Number)), s: String(p.s || "") }));
+			// a file from anywhere: only known parts, whole numbers, the text kept encoded (a "/" or ";" in it
+			// would break the upload)
+			const recode = (t) => { try { return encodeURIComponent(decodeURIComponent(t)); } catch (e) { return encodeURIComponent(t); } };
+			const parts = d.parts.filter(p => p && typeof p.t === "string" && p.t.length === 1 && "TSPDHLAFCKY".includes(p.t)).map(p => ({ t: p.t, x1: p.x1 | 0, y1: p.y1 | 0, x2: p.x2 | 0, y2: p.y2 | 0, f: p.f | 0,
+				b: (Array.isArray(p.b) ? p.b : []).filter(x => Array.isArray(x) && x.length === 3 && x.every(Number.isInteger)), s: recode(String(p.s || "")) }));
 			if (!confirm(`「${d.station || "?"}」のカスタム盤（部品 ${parts.length} 個）を読み込みますか？今の編集内容と置き換わります。`)) return;
 			cpEdit.parts = parts; cpEdit.sel = -1; cpEdit.dirty = true;
 			render();

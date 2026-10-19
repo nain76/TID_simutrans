@@ -167,7 +167,9 @@ async function command(cmd, label) {
 		if (!r.ok) throw new Error("HTTP " + r.status);
 	} catch (e) {
 		pending.delete(cmd);
+		for (const [k, a] of shownAhead) if (a.cmd === cmd) shownAhead.delete(k);
 		toast("送信できませんでした: " + e.message);
+		render();
 	}
 	// the result arrives as an event; give up waiting after a while
 	setTimeout(() => { if (pending.delete(cmd)) render(); }, 15000);
@@ -175,9 +177,10 @@ async function command(cmd, label) {
 // sends a command and waits for its result event
 function commandResult(cmd) {
 	return new Promise((resolve) => {
-		waiters.push({ cmd, resolve });
+		const w = { cmd, resolve };
+		waiters.push(w);
 		command(cmd);
-		setTimeout(() => resolve({ ok: false, error: "timeout" }), 15000);
+		setTimeout(() => { waiters = waiters.filter(x => x !== w); resolve({ ok: false, error: "timeout" }); }, 15000);
 	});
 }
 let waiters = [];
@@ -253,7 +256,9 @@ async function refreshTracks() {
 	tracks = await api(`/api/tracks?x1=${a.x1}&y1=${a.y1}&x2=${a.x2}&y2=${a.y2}`);
 	indexTracks();
 }
+let tracksSig = "";   // the track layout (not the trains on it): the setup checks are worked out again only when it changes
 function indexTracks() {
+	tracksSig = tracks.tiles.map(t => key(t.p) + ":" + t.r + "/" + t.m + "/" + (t.h || "") + (t.s ? "s" + t.s.dir + t.s.o : "") + (t.d ? "d" : "")).join(";");
 	tileIndex = new Map(); xyIndex = new Map();
 	for (const t of tracks.tiles) {
 		tileIndex.set(key(t.p), t);

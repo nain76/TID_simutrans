@@ -237,14 +237,18 @@ try {
 	const nParts = await page.evaluate(() => cpEdit.parts.length);
 	check(exported.format === "tid-custom-panel" && exported.parts.length === nParts, `exported to a file (${exported.parts.length} parts)`);
 	exported.parts = exported.parts.filter(p => p.t !== "L");
+	const kept = exported.parts.length;
+	// a hand-edited file: an unknown kind of part is dropped, a text with the separators of the upload ("/", ";") is kept
+	exported.parts.push({ t: "TS", x1: 1, y1: 1, x2: 2, y2: 1, f: 0, b: [], s: "" }, { t: "L", x1: 1, y1: 9, x2: 1, y2: 9, f: 0, b: [], s: "a/b;c" });
 	require("node:fs").writeFileSync(file, JSON.stringify(exported));
 	const [fc] = await Promise.all([page.waitForEvent("filechooser"), page.click("#viewbar button[data-cp=import]")]);
 	await fc.setFiles(file);
-	await waitFor(async () => (await page.evaluate(() => cpEdit.parts.length)) === exported.parts.length, 5000, "imported");
-	check(await page.evaluate(() => !cpEdit.parts.some(p => p.t === "L")), "the file is read back into the editor");
+	await waitFor(async () => (await page.evaluate(() => cpEdit.parts.length)) === kept + 1, 5000, "imported");
+	check(await page.evaluate(() => cpEdit.parts.filter(p => p.t === "L").length === 1), "the file is read back into the editor (the unknown part left out)");
 	await page.click("#viewbar button[data-cp=apply]");
-	await waitFor(async () => (await panel(sid)).parts.length === exported.parts.length, 10000, "saved");
-	check(true, "and saved");
+	await waitFor(async () => (await panel(sid)).parts.length === kept + 1, 10000, "saved");
+	const lp = (await panel(sid)).parts.find(p => p.t === "L");
+	check(decodeURIComponent(lp.s) === "a/b;c", `and saved, the text with "/" and ";" intact (${decodeURIComponent(lp.s)})`);
 
 	console.log("[9] north after turning the map, undo, somebody else editing");
 	await page.evaluate(() => { info.rot = 1; render(); });
