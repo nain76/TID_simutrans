@@ -293,6 +293,7 @@ function areaExits(st) {
 	if (!stationTiles || !halt) return null;
 	const groups = platformGroups(halt);
 	const reg = (t) => st.signals.some(s => key(s.pos) === key(t.p));
+	const sidings = sidingHaltIds();
 	const res = [];
 	groups.forEach((g, gi) => {
 		const inGroup = new Set(g.map(t => key(t.p)));
@@ -302,7 +303,7 @@ function areaExits(st) {
 				if (!(t.r & d)) continue;
 				const n = neighbour(t, d);
 				if (!n || inGroup.has(key(n.p))) continue;
-				const ex = explore(n, d, (x) => !stationTiles.has(key(x.p)) || (x.h && x.h !== halt && !sidingHaltIds().has(x.h)), (x) => x.h === halt);
+				const ex = explore(n, d, (x) => !stationTiles.has(key(x.p)) || (x.h && x.h !== halt && !sidings.has(x.h)), (x) => x.h === halt);
 				const dep = (st.departures || []).find(x => key(x.pos) === key(t.p));
 				// trains cannot leave this way (one-way signal, or only sidings and depots): still listed apart,
 				// the check may be wrong for a layout it does not know (a virtual signal can be set anyway)

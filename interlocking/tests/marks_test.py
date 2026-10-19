@@ -64,6 +64,18 @@ def run(args):
         check(not r["ok"] and r["error"] == "out of use (magnet)", "the route S1 -> platform 1 is still blocked (S1 and (4,5) still have one)")
         check(p.cmd(f"mk_mov,{sid},{x5['id']},5,5,0")["ok"], "and back")
 
+        # the numbers are shared by stations, routes and magnets: after 65535 they start again, skipping those in use
+        p.request("debug_next_id 65534")
+        for _ in range(4):
+            check(p.cmd(f"mk_add,{sid},6,5,0,M,0,wrap")["ok"], "a magnet near the end of the numbers")
+        st0 = p.status()
+        ids = [s["id"] for s in st0["stations"]] + [r["id"] for r in st0["routes"]] + [m["id"] for s in st0["stations"] for m in s["marks"]]
+        wrapped = sorted(m["id"] for m in st0["stations"][0]["marks"] if m["s"] == "wrap")
+        check(len(ids) == len(set(ids)) and 0 not in ids and wrapped[0] < 100 and 65535 in wrapped, f"no number twice after the wrap (magnets {wrapped}, all {sorted(ids)})")
+        for m in st0["stations"][0]["marks"]:
+            if m["s"] == "wrap":
+                p.cmd(f"mk_del,{sid},{m['id']}")
+
         print("[3] removed")
         for m in ms:
             if m["k"] == "X":

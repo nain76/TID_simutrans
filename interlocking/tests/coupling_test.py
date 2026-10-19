@@ -68,6 +68,13 @@ def run(args):
             turn(True)
             r = p.cmd(f"{cmd},{sid},{into(9)},B")
             check(r["ok"], f"calling-on lever: route S1 -> the siding stop where A waits ({r.get('error')})")
+            if args.relay:
+                check(p.cmd(f"sl_turn,{sid},3,5,0,N,S")["ok"], "the pink lever turned back")
+                wait_until(lambda: not p.status()["routes"], 20, "pink route cancelled")
+                check(True, "turning the pink lever back cancels its route")
+                turn(True)
+                r = p.cmd(f"{cmd},{sid},{into(9)},B")
+                check(r["ok"], f"set again ({r.get('error')})")
             p.request("debug_save il_coupling")
             time.sleep(2)
             game.terminate()

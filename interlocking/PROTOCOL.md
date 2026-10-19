@@ -143,6 +143,7 @@
 | `route` | 進路の状態が変わった。`id`、`station`、`state`（`idle` / `set` / `occupied` / `releasing`）、`convoy`（進入した列車名） |
 | `wrong_route` | 設定された進路の先から列車の目的地へ行けない。`id`、`convoy` |
 | `panel` | カスタム盤が保存された。`station`、`parts`（部品の数） |
+| `broken` | 設定済みの進路の線路がゲームで撤去されていたため、列車を入れずに進路を取り消した。`id`（進路） |
 | `rescan` | 配線を読み直した結果（`st_rescan`）。`station`、外した数 `signals_removed`・`departures_removed`・`levers_removed`・`sidings_removed`、端を移した出発点の数 `departures_moved`、進路の名前 `routes_rerouted`（引き直した）・`routes_broken`（通れない）・`routes_removed`（始点がなくなって消した）、使用中で見なかった進路の数 `routes_busy`。結果のイベントより先に届く |
 | `reset` / `rotated` | マップの読み込み・作り直し／回転。盤は `status` を取り直す |
 

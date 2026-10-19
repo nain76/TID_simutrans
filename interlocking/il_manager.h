@@ -247,6 +247,13 @@ private:
 
 	void rdwr_blob(il_blob_t &b);
 	uint16 next_id;
+	/// a free id for a station, route or magnet (they share the numbers; after 65535 they start again at 1)
+	uint16 alloc_id();
+	bool id_in_use(uint16 id) const;
+public:
+	/// test helper: where the next id is taken from
+	void debug_set_next_id(uint16 id) { next_id = id; }
+private:
 
 	/// local events for the panel (not part of the game state)
 	vector_tpl<plainstring> events;

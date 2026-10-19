@@ -217,6 +217,10 @@ try {
 	await page.click("#modeBox button[data-mode='1']");
 	await waitFor(async () => (await getJson("/api/status")).stations[0].manual, 15000, "manual mode");
 	check(true, "operator mode");
+	// a failed command of another operator (network game): in the log, but no error message here
+	await page.evaluate(() => { document.getElementById("toast").style.display = "none"; return fetch("/api/cmd", { method: "POST", headers: { "X-IL-Panel": "1" }, body: "cancel,65000" }); });
+	await page.waitForFunction(() => document.getElementById("log").textContent.includes("（ほかの操作者）NG  cancel,65000"), null, { timeout: 10000 });
+	check(await page.evaluate(() => document.getElementById("toast").style.display === "none"), "another operator's failed command is logged, but shows no error here");
 	// a name given in the game must never become HTML (another company could name it in a network game)
 	await page.evaluate(() => fetch("/api/cmd", { method: "POST", headers: { "X-IL-Panel": "1" }, body: "name_set," + station().id + ",3,5,0,<img src=x onerror=\"window.__xss=1\">S1" }));
 	await page.waitForFunction(() => document.body.textContent.includes("<img src=x"), null, { timeout: 10000 });

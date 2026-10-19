@@ -82,6 +82,7 @@ async function newStation() {
 	if (!ev) return;
 	setArea(ev.id, area);
 	selectStation(ev.id, true);
+	autoSidingFor = ev.id;
 	await refreshStatus();
 	await refreshTracks();
 	toast(`「${h.name}」を作成しました。次に場内・出発信号を登録してください`, true);

@@ -635,13 +635,15 @@ function setSidingHalts(st, ids) {
 	const pos = ids.map(id => (tracks.tiles.find(t => t.h === id) || {}).p).filter(Boolean);
 	command(`st_sid,${st.id},${pos.map(p => p.join(":")).join(";")}`, "留置線として扱う駅");
 }
-// once per station: stops named like a siding (留置・引上…) are used as sidings
+// once, by the browser that made the station: stops named like a siding (留置・引上…) are used as sidings
+// (never later: somebody may have unchecked them all on purpose)
+let autoSidingFor = null;
 function autoSidingHalts(st, cands) {
-	if ((st.siding_halts || []).length || localStore("sidauto." + st.id)) return;
+	if (autoSidingFor !== st.id || !tracks.tiles.length) return;
+	autoSidingFor = null;
+	if ((st.siding_halts || []).length) return;
 	const named = cands.filter(h => SIDING_NAME.test(h.name));
-	if (!named.length) return;
-	localStore("sidauto." + st.id, "1");
-	setSidingHalts(st, named.map(h => h.id));
+	if (named.length) setSidingHalts(st, named.map(h => h.id));
 }
 
 function renderNames(st) {

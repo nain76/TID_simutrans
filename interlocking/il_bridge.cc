@@ -337,6 +337,11 @@ static void handle_line(client_t &c, char *line)
 			answer.append("}");
 		}
 	}
+	else if(  getenv("TID_IL_DEBUG")  &&  strncmp(line, "debug_next_id ", 14) == 0  ) {
+		// test helper (only with TID_IL_DEBUG set): the next id handed out (to test the wrap at 65535)
+		il->debug_set_next_id((uint16)atoi(line + 14));
+		answer.append("{\"type\":\"debug_work\",\"ok\":true}");
+	}
 	else if(  getenv("TID_IL_DEBUG")  &&  strcmp(line, "debug_convoys") == 0  ) {
 		// test helper (only with TID_IL_DEBUG set): list all convoys
 		answer.append("{\"type\":\"convoys\",\"convoys\":[");

@@ -131,6 +131,8 @@ def run(args):
 
         # wait for the scenario to build the layout (signal S1 at (3,5,0))
         wait_until(lambda: any(s["pos"] == [3, 5, 0] for s in p.request("signals 0 0 15 15")["signals"]), 60, "layout")
+        big = p.request("signals -5 0 100 32767")
+        check(any(s["pos"] == [3, 5, 0] for s in big["signals"]), "an area far beyond the map is answered (within the map), the game does not hang")
         print("[1] configure the interlocking")
         r = p.cmd("st_new,A station, east")
         check(r["ok"], "create station")

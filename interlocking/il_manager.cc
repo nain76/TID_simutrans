@@ -212,6 +212,18 @@ static halthandle_t halt_at(koord3d pos)
 }
 
 
+// the route passes this tile before its last one
+static bool passes_before_end(const il_route_t *r, koord3d pos)
+{
+	for(  uint32 i = 0;  i + 1 < r->tiles.get_count();  i++  ) {
+		if(  r->tiles[i] == pos  ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
 static schiene_t *get_rail(koord3d pos)
 {
 	grund_t *gr = world()->lookup(pos);
@@ -234,6 +246,41 @@ il_station_t *interlocking_manager_t::find_station(uint16 id) const
 		}
 	}
 	return NULL;
+}
+
+
+bool interlocking_manager_t::id_in_use(uint16 id) const
+{
+	if(  find_route(id)  ) {
+		return true;
+	}
+	FOR(vector_tpl<il_station_t *>, const st, stations) {
+		if(  st->id == id  ) {
+			return true;
+		}
+		FOR(vector_tpl<il_mark_t *>, const m, st->marks) {
+			if(  m->id == id  ) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+
+uint16 interlocking_manager_t::alloc_id()
+{
+	// the same on every client: the same objects exist everywhere
+	for(  uint32 tries = 0;  tries < 65536;  tries++  ) {
+		const uint16 id = next_id++;
+		if(  next_id == 0  ) {
+			next_id = 1;
+		}
+		if(  id != 0  &&  !id_in_use(id)  ) {
+			return id;
+		}
+	}
+	return 0;
 }
 
 
@@ -682,7 +729,7 @@ const char *interlocking_manager_t::cmd_signal_lever(il_station_t *st, koord3d p
 	}
 	// back to normal: a route that is set with this lever is cancelled (with approach locking)
 	FOR(vector_tpl<il_route_t *>, r, routes) {
-		if(  r->tiles[0] == pos  &&  r->state == IL_SET  &&  r->shunt == (lever != 0)  ) {
+		if(  r->tiles[0] == pos  &&  r->state == IL_SET  &&  (r->shunt  ||  r->call_on) == (lever != 0)  ) {
 			cmd_cancel(r);
 		}
 	}
@@ -909,7 +956,7 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 		}
 		else {
 			il_station_t *st = new il_station_t();
-			st->id = next_id++;
+			st->id = alloc_id();
 			st->name = f[2];
 			st->owner = player ? player->get_player_nr() : 1;
 			st->manual = false;
@@ -924,7 +971,7 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 	}
 	else if(  strcmp(cmd, "st_new") == 0  &&  n >= 2  ) {
 		il_station_t *st = new il_station_t();
-		st->id = next_id++;
+		st->id = alloc_id();
 		st->name = f[1];
 		st->owner = player ? player->get_player_nr() : 1;
 		st->manual = false;
@@ -1330,7 +1377,7 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 		}
 		else {
 			il_mark_t *m = new il_mark_t();
-			m->id = next_id++;
+			m->id = alloc_id();
 			m->pos = pos;
 			m->kind = (uint8)f[5][0];
 			m->color = (uint8)atoi(f[6]);
@@ -1611,7 +1658,7 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 		}
 		else {
 			il_route_t *r = new il_route_t();
-			r->id = next_id++;
+			r->id = alloc_id();
 			r->station = st->id;
 			r->name = n >= 9 ? f[8] : "";
 			FOR(vector_tpl<koord3d>, const &t, tiles) {
@@ -2261,7 +2308,7 @@ void interlocking_manager_t::rescan_station(il_station_t *st)
 il_route_t *interlocking_manager_t::new_route(il_station_t *st, const vector_tpl<koord3d> &tiles, const char *name, bool temp)
 {
 	il_route_t *r = new il_route_t();
-	r->id = next_id++;
+	r->id = alloc_id();
 	r->station = st->id;
 	r->name = name;
 	r->temp = temp;
@@ -2488,6 +2535,19 @@ bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sin
 bool interlocking_manager_t::admit_train(rail_vehicle_t *v, uint16 start, il_route_t *r, sint32 &restart_speed, uint16 reserve_from)
 {
 	convoi_t *cnv = v->get_convoi();
+	if(  r->state == IL_SET  ) {
+		// the track may have been removed in the game since the route was set: never into the gap
+		FOR(vector_tpl<koord3d>, const &t, r->tiles) {
+			if(  get_rail(t) == NULL  ) {
+				set_route_state(r, IL_IDLE);
+				cbuffer_t ev;
+				ev.printf("{\"type\":\"broken\",\"id\":%u}", r->id);
+				push_event(ev);
+				restart_speed = 0;
+				return false;
+			}
+		}
+	}
 	if(  r->state == IL_SET  &&  ends_behind_train(r)  &&  !ends_at_coupling(r)  ) {
 		// behind a standing train the whole train must fit on the track, the tail must not foul the points
 		const uint32 need = (cnv->get_entire_convoy_length() + CARUNITS_PER_TILE - 1) / CARUNITS_PER_TILE;
@@ -2513,7 +2573,10 @@ bool interlocking_manager_t::admit_train(rail_vehicle_t *v, uint16 start, il_rou
 	if(  r->state == IL_SET  ) {
 		il_departure_t *dep = NULL;
 		const koord3d end = r->tiles.back();
-		if(  find_departure_track(end, &dep)  &&  dep->anchor != r->tiles[0]  &&  !dep->tiles.is_contained(r->tiles[0])  &&  !train_stops_on(cnv, dep)  ) {
+		// a train that entered the platform at the end of the virtual departure signal (the route passes it
+		// before its last tile) leaves at the other end: it needs no departure route
+		if(  find_departure_track(end, &dep)  &&  dep->anchor != r->tiles[0]  &&  !dep->tiles.is_contained(r->tiles[0])  &&  !train_stops_on(cnv, dep)
+		  &&  !passes_before_end(r, dep->anchor)  ) {
 			FOR(vector_tpl<il_route_t *>, o, routes) {
 				if(  o->tiles[0] == dep->anchor  &&  o->state == IL_SET  &&  !o->shunt  ) {
 					through = o;
@@ -3444,13 +3507,15 @@ void interlocking_manager_t::get_status_json(cbuffer_t &buf) const
 
 void interlocking_manager_t::get_signals_json(cbuffer_t &buf, koord p1, koord p2) const
 {
-	const sint16 x1 = min(p1.x, p2.x), x2 = max(p1.x, p2.x);
-	const sint16 y1 = min(p1.y, p2.y), y2 = max(p1.y, p2.y);
+	// within the map (a loop up to 32767 in sint16 would never end)
+	const koord size = world()->get_size();
+	const sint32 x1 = max(0, (sint32)min(p1.x, p2.x)), x2 = min((sint32)size.x - 1, (sint32)max(p1.x, p2.x));
+	const sint32 y1 = max(0, (sint32)min(p1.y, p2.y)), y2 = min((sint32)size.y - 1, (sint32)max(p1.y, p2.y));
 	buf.append("{\"type\":\"signals\",\"signals\":[");
 	bool first = true;
 	uint32 found = 0;
-	for(  sint16 y = y1;  y <= y2  &&  found < 1000;  y++  ) {
-		for(  sint16 x = x1;  x <= x2  &&  found < 1000;  x++  ) {
+	for(  sint32 y = y1;  y <= y2  &&  found < 1000;  y++  ) {
+		for(  sint32 x = x1;  x <= x2  &&  found < 1000;  x++  ) {
 			const planquadrat_t *plan = world()->access(koord(x, y));
 			if(  plan == NULL  ) {
 				continue;

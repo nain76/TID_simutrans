@@ -190,12 +190,15 @@ async function pollEvents() {
 }
 function handleEvent(ev) {
 	if (ev.type === "result") {
+		// in a network game the results of everybody's commands come here: only this browser's own are shown
+		// as an error (the log keeps all)
+		const mine = pending.has(ev.command);
 		const label = pending.get(ev.command) || ev.command;
 		pending.delete(ev.command);
-		if (!ev.ok) for (const [k, a] of shownAhead) if (a.cmd === ev.command) shownAhead.delete(k);
+		if (!ev.ok && mine) for (const [k, a] of shownAhead) if (a.cmd === ev.command) shownAhead.delete(k);
 		waiters = waiters.filter(w => { if (w.cmd === ev.command) { w.resolve(ev); return false; } return true; });
-		log((ev.ok ? "OK  " : "NG  ") + label + (ev.ok ? "" : " … " + tr(ev.error)), ev.ok ? "ok" : "err");
-		if (!ev.ok && !ev.command.startsWith("rt_def") && !ev.command.startsWith("rt_path")) toast(tr(ev.error));
+		log((mine ? "" : "（ほかの操作者）") + (ev.ok ? "OK  " : "NG  ") + label + (ev.ok ? "" : " … " + tr(ev.error)), ev.ok ? "ok" : "err");
+		if (mine && !ev.ok && !ev.command.startsWith("rt_def") && !ev.command.startsWith("rt_path")) toast(tr(ev.error));
 	}
 	else if (ev.type === "route") {
 		const r = status.routes.find(x => x.id === ev.id);
@@ -219,6 +222,11 @@ function handleEvent(ev) {
 	}
 	else if (ev.type === "panel") {
 		panelSaves.set(ev.station, (panelSaves.get(ev.station) || 0) + 1);
+	}
+	else if (ev.type === "broken") {
+		const r = status.routes.find(x => x.id === ev.id);
+		toast(`「${r ? r.name : ev.id}」の線路が撤去されていたため、進路を取り消しました（「配線を読み直す」を押してください）`);
+		log(`進路取消（線路なし）: ${r ? r.name : ev.id}`, "err");
 	}
 	else if (ev.type === "rescan") {
 		rescanResults.set(ev.station, ev);
@@ -264,6 +272,13 @@ function indexTracks() {
 function viewOpt() {
 	try { return Object.assign({ connected: true, hidden: [] }, JSON.parse(localStore("view." + stationId) || "{}")); }
 	catch (e) { return { connected: true, hidden: [] }; }
+}
+// the same, read only, without parsing it again for every tile (isVisible runs thousands of times per drawing)
+let viewOptMemo = { raw: null, v: null };
+function viewOptRO() {
+	const raw = (stationId + "|" + localStore("view." + stationId)) || "";
+	if (viewOptMemo.raw !== raw) viewOptMemo = { raw, v: viewOpt() };
+	return viewOptMemo.v;
 }
 function setViewOpt(o) { localStore("view." + stationId, JSON.stringify(o)); }
 
@@ -347,7 +362,14 @@ function computeConnected(haltId) {
 }
 
 // heights in the area, with a name (underground / elevated / ground)
+let layersMemo = { tracks: null, v: null };
 function layers() {
+	// once per set of tracks (the name of each tile's level is asked for every tile)
+	if (layersMemo.tracks === tracks) return layersMemo.v;
+	layersMemo = { tracks, v: computeLayers() };
+	return layersMemo.v;
+}
+function computeLayers() {
 	const m = new Map();
 	for (const t of tracks.tiles) {
 		if (!m.has(t.p[2])) m.set(t.p[2], { z: t.p[2], n: 0, u: 0, b: 0 });
@@ -361,7 +383,7 @@ function layers() {
 
 // visible = shown normally and clickable; the rest is drawn faint
 function isVisible(t) {
-	const o = viewOpt();
+	const o = viewOptRO();
 	if (o.hidden.includes(t.p[2])) return false;
 	if (o.connected && stationTiles && !stationTiles.has(key(t.p))) return false;
 	return true;
