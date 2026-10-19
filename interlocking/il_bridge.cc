@@ -26,6 +26,7 @@
 #include "../dataobj/environment.h"
 #include "../utils/cbuffer_t.h"
 #include "../utils/plainstring.h"
+#include "../sys/simsys.h"
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -35,6 +36,8 @@
 #define IL_BRIDGE_MAX_CLIENTS 8
 #define IL_BRIDGE_MAX_LINE 8192
 #define IL_BRIDGE_MAX_EVENTS 1000
+#define IL_BRIDGE_IDLE_MS 10000      ///< a browser connection without a complete request is closed after this
+#define IL_BRIDGE_SEND_TIMEOUT_MS 500 ///< a client that does not read is closed instead of stopping the game
 
 
 namespace il_bridge {
@@ -50,6 +53,7 @@ struct client_t {
 	char buf[IL_BRIDGE_MAX_LINE];
 	size_t len;
 	uint8 mode;
+	uint32 since; ///< time of the last data received (dr_time; not part of the game)
 };
 
 struct event_t {
@@ -106,6 +110,7 @@ static void init()
 		clients[i].sock = INVALID_SOCKET;
 		clients[i].len = 0;
 		clients[i].mode = MODE_UNKNOWN;
+		clients[i].since = 0;
 	}
 
 	const int port = read_port();
@@ -705,6 +710,7 @@ static void read_client(client_t &c)
 		return;
 	}
 	c.len += got;
+	c.since = dr_time();
 
 	if(  c.mode == MODE_UNKNOWN  &&  c.len >= 4  ) {
 		c.mode = (strncmp(c.buf, "GET ", 4) == 0  ||  strncmp(c.buf, "POST", 4) == 0  ||  strncmp(c.buf, "HEAD", 4) == 0  ||  strncmp(c.buf, "OPTI", 4) == 0) ? MODE_HTTP : MODE_LINES;
@@ -752,6 +758,18 @@ void poll()
 					}
 				}
 				if(  slot < 0  ) {
+					// all taken: give the slot of the oldest browser connection that has not sent a request
+					// (browsers open connections in advance and keep them idle)
+					for(  int i = 0;  i < IL_BRIDGE_MAX_CLIENTS;  i++  ) {
+						if(  clients[i].mode != MODE_LINES  &&  (slot < 0  ||  clients[i].since < clients[slot].since)  ) {
+							slot = i;
+						}
+					}
+					if(  slot >= 0  ) {
+						close_client(clients[slot]);
+					}
+				}
+				if(  slot < 0  ) {
 					network_close_socket(s);
 				}
 				else {
@@ -760,9 +778,17 @@ void poll()
 					int on = 1;
 					setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, (const char *)&on, sizeof(on));
 #endif
+					// sending blocks the game: a client that does not read is dropped after a short time
+#ifdef _WIN32
+					DWORD to = IL_BRIDGE_SEND_TIMEOUT_MS;
+#else
+					struct timeval to = { IL_BRIDGE_SEND_TIMEOUT_MS / 1000, (IL_BRIDGE_SEND_TIMEOUT_MS % 1000) * 1000 };
+#endif
+					setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&to, sizeof(to));
 					clients[slot].sock = s;
 					clients[slot].len = 0;
 					clients[slot].mode = MODE_UNKNOWN;
+					clients[slot].since = dr_time();
 				}
 			}
 		}
@@ -770,6 +796,13 @@ void poll()
 			if(  clients[i].sock != INVALID_SOCKET  &&  FD_ISSET(clients[i].sock, &fds)  ) {
 				read_client(clients[i]);
 			}
+		}
+	}
+	// browser connections that never send a whole request are closed (the line clients stay)
+	const uint32 now = dr_time();
+	for(  int i = 0;  i < IL_BRIDGE_MAX_CLIENTS;  i++  ) {
+		if(  clients[i].sock != INVALID_SOCKET  &&  clients[i].mode != MODE_LINES  &&  now - clients[i].since > IL_BRIDGE_IDLE_MS  ) {
+			close_client(clients[i]);
 		}
 	}
 
