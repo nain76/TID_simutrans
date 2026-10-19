@@ -455,6 +455,9 @@ def run(args):
         check(p.status()["stations"][0]["view"] == [1, 2, 13, 9, halt["id"]], f"everybody gets the same area, the stop as numbered by this game: {p.status()['stations'][0]['view']}")
 
         print("[5] rotate the map")
+        # a station made for another stop, before any area was chosen: its stop must turn with the map, too
+        halt2 = p.request("halts")["halts"][1]
+        check(p.cmd(f"st_newh,{hp(halt2['tiles'][0])},Hold")["ok"], f"a station for the stop {halt2['name']} (no area yet)")
         rot = simple_tool_id("TOOL_ROTATE90")
         before = p.status()
         p.request(f"debug_tool {rot} ")
@@ -464,6 +467,10 @@ def run(args):
         check(info()["rot"] == 1, "the map was turned once: north moved (info rot)")
         check(p.status()["stations"][0]["view"][:4] != [1, 2, 13, 9], "the area turns with the map")
         check(p.status()["stations"][0]["view"][4] == halt["id"], "and still knows its stop")
+        h2 = next(h for h in p.request("halts")["halts"] if h["id"] == halt2["id"])
+        r = p.cmd(f"st_newh,{hp(h2['tiles'][0])},Hold2")
+        check(not r["ok"] and r["error"] == "this stop already has an interlocking panel", f"the station without an area still knows its stop after the turn ({r.get('error')})")
+        check(p.cmd(f"st_del,{next(x for x in p.status()['stations'] if x['name'] == 'Hold')['id']}")["ok"], "removed again")
         pr = panel()["parts"]
         check(pr[0]["b"] != pn["parts"][0]["b"] and (pr[0]["x1"], pr[0]["y1"], pr[0]["x2"], pr[0]["y2"]) == (2, 3, 12, 3), "custom panel: its tiles turn with the map, its drawing stays")
         s_after = after["stations"][0]["signals"][0]
@@ -487,6 +494,7 @@ def run(args):
         # set any free route (the train may just be running over one of them)
         set_ok = wait_until(lambda: next((rid for rid in (r2["id"], rb["id"], r1["id"]) if p.cmd(f"set,{rid}")["ok"]), None), 90, "a free route to set")
         check(True, f"route {set_ok} set before saving")
+        check(p.cmd(f"cp_begin,{sid}")["ok"] and p.cmd(f"cp_add,{sid},T/1/1/4/1/0/3:5:0+4:5:0/")["ok"], "an upload of a custom panel, interrupted by saving (a client joins)")
         saved = p.status()
         p.request("debug_save il_test")
         time.sleep(2)
@@ -511,6 +519,8 @@ def run(args):
         check(strip(loaded["routes"]) == strip(saved["routes"]), "routes and their states restored")
         pl = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/panel?id={loaded['stations'][0]['id']}").read())
         check([(x["t"], x["x1"], x["y1"], x["b"], x["s"]) for x in pl["parts"]] == [("T", 2, 3, [[3, 5, 0], [4, 5, 0], [5, 5, 0]], ""), ("S", 1, 2, [[3, 5, 0]], ""), ("L", 4, 8, [], "%E4%B8%8A%E3%82%8A")], "custom panel restored")
+        r = p.cmd(f"cp_end,{sid},1")
+        check(r["ok"] and [x["t"] for x in panel()["parts"]] == ["T"], f"the upload goes on after loading: its parts were saved ({r.get('error')})")
     finally:
         game.terminate()
         try:

@@ -2939,7 +2939,7 @@ void interlocking_manager_t::rdwr(loadsave_t *file)
 
 
 // format of the data block (independent of IL_SAVE_VERSION, which belongs to the old format)
-#define IL_BLOCK_VERSION 16
+#define IL_BLOCK_VERSION 17
 
 void interlocking_manager_t::save_block(loadsave_t *file)
 {
@@ -2980,6 +2980,31 @@ static void future_fields(il_blob_t &b)
 		plainstring s("a field of a later version");
 		b.rdwr_long(x);
 		b.rdwr_str(s);
+	}
+}
+
+
+/// the parts of a custom panel (a station's, or one being uploaded)
+static void rdwr_parts(il_blob_t &b, vector_tpl<il_part_t *> &parts)
+{
+	uint32 np = parts.get_count();
+	b.rdwr_long(np);
+	for(  uint32 j = 0;  j < np  &&  j < IL_MAX_PARTS  &&  !b.broken;  j++  ) {
+		il_part_t *pt = b.loading ? new il_part_t() : parts[j];
+		b.begin_section();
+		b.rdwr_byte(pt->type);
+		b.rdwr_short(pt->x1);
+		b.rdwr_short(pt->y1);
+		b.rdwr_short(pt->x2);
+		b.rdwr_short(pt->y2);
+		b.rdwr_byte(pt->flags);
+		b.rdwr_pos_vector(pt->bind);
+		b.rdwr_str(pt->text);
+		future_fields(b);
+		b.end_section();
+		if(  b.loading  ) {
+			parts.append(pt);
+		}
 	}
 }
 
@@ -3098,25 +3123,9 @@ void interlocking_manager_t::rdwr_blob(il_blob_t &b)
 			b.rdwr_byte_vector(st->area_val);
 		}
 		if(  version >= 13  ) {
-			uint32 np = st->parts.get_count();
-			b.rdwr_long(np);
-			for(  uint32 j = 0;  j < np  &&  j < IL_MAX_PARTS  &&  !b.broken;  j++  ) {
-				il_part_t *pt = b.loading ? new il_part_t() : st->parts[j];
-				b.begin_section();
-				b.rdwr_byte(pt->type);
-				b.rdwr_short(pt->x1);
-				b.rdwr_short(pt->y1);
-				b.rdwr_short(pt->x2);
-				b.rdwr_short(pt->y2);
-				b.rdwr_byte(pt->flags);
-				b.rdwr_pos_vector(pt->bind);
-				b.rdwr_str(pt->text);
-				future_fields(b);
-				b.end_section();
-				if(  b.loading  ) {
-					st->parts.append(pt);
-					st->parts_rev = ++panel_rev_counter;
-				}
+			rdwr_parts(b, st->parts);
+			if(  b.loading  &&  !st->parts.empty()  ) {
+				st->parts_rev = ++panel_rev_counter;
 			}
 		}
 		if(  version >= 15  ) {
@@ -3190,6 +3199,15 @@ void interlocking_manager_t::rdwr_blob(il_blob_t &b)
 			routes.append(r);
 		}
 	}
+	if(  version >= 17  ) {
+		// a custom panel being uploaded in parts (cp_begin ... cp_end): a client joining in the middle of it
+		// needs it, or its custom panel would differ from everybody else's after cp_end
+		b.begin_section();
+		b.rdwr_short(stage_station);
+		rdwr_parts(b, stage);
+		future_fields(b);
+		b.end_section();
+	}
 	if(  !b.loading  &&  getenv("TID_IL_TEST_FUTURE")  ) {
 		// a whole section of a later version
 		b.begin_section();
@@ -3252,14 +3270,23 @@ void interlocking_manager_t::rotate90(sint16 y_size)
 			st->view_x2 = max(a.x, b.x);
 			st->view_y1 = min(a.y, b.y);
 			st->view_y2 = max(a.y, b.y);
-			if(  st->view_hpos != koord3d::invalid  ) {
-				st->view_hpos.rotate90(y_size);
-			}
+		}
+		// the stop of the panel (also before an area was chosen)
+		if(  st->view_hpos != koord3d::invalid  ) {
+			st->view_hpos.rotate90(y_size);
 		}
 		// the custom panel keeps its drawing, only the tiles it stands for turn with the map
 		FOR(vector_tpl<il_part_t *>, pt, st->parts) {
 			FOR(vector_tpl<koord3d>, &t, pt->bind) {
 				t.rotate90(y_size);
+			}
+		}
+		if(  stage_station == st->id  ) {
+			// a custom panel being uploaded for this station
+			FOR(vector_tpl<il_part_t *>, pt, stage) {
+				FOR(vector_tpl<koord3d>, &t, pt->bind) {
+					t.rotate90(y_size);
+				}
 			}
 		}
 		st->parts_rev = ++panel_rev_counter;
