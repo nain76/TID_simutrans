@@ -2428,6 +2428,18 @@ bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sin
 		return false;
 	}
 
+	// a signal for both directions is asked for trains of either direction: the routes of the panel lead
+	// away from the signal in one direction only (their second tile); a train coming from that side
+	// passes the signal the other way, which is not the business of the panel
+	const koord3d prev = next_block > 0 ? cnv->get_route()->at(next_block - 1) : koord3d::invalid;
+	if(  prev != koord3d::invalid  ) {
+		FOR(vector_tpl<il_route_t *>, rr, routes) {
+			if(  rr->tiles[0] == spos  &&  rr->tiles.get_count() >= 2  &&  rr->tiles[1] == prev  ) {
+				return false;
+			}
+		}
+	}
+
 	// find the route that is set from this signal (or already admitted this train)
 	il_route_t *r = NULL;
 	FOR(vector_tpl<il_route_t *>, rr, routes) {
