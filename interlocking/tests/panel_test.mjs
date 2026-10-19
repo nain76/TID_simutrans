@@ -217,6 +217,14 @@ try {
 	await page.click("#modeBox button[data-mode='1']");
 	await waitFor(async () => (await getJson("/api/status")).stations[0].manual, 15000, "manual mode");
 	check(true, "operator mode");
+	// a name given in the game must never become HTML (another company could name it in a network game)
+	await page.evaluate(() => fetch("/api/cmd", { method: "POST", headers: { "X-IL-Panel": "1" }, body: "name_set," + station().id + ",3,5,0,<img src=x onerror=\"window.__xss=1\">S1" }));
+	await page.waitForFunction(() => document.body.textContent.includes("<img src=x"), null, { timeout: 10000 });
+	await page.click("nav button[data-tab=setup]"); await sleep(1500);
+	await page.click("nav button[data-tab=run]"); await sleep(1500);
+	check(await page.evaluate(() => !window.__xss && !document.querySelector("img[src=x]")), "a name with HTML in it is shown as text (run and setup tabs)");
+	await page.evaluate(() => fetch("/api/cmd", { method: "POST", headers: { "X-IL-Panel": "1" }, body: "name_set," + station().id + ",3,5,0," }));
+	await page.waitForFunction(() => !document.getElementById("tab-run").textContent.includes("<img src=x"), null, { timeout: 10000 });
 	const cid = (await lineRequest("debug_convoys")).convoys[0].id;
 	await lineRequest(`debug_tool ${simpleToolId("TOOL_CHANGE_CONVOI")} g,${cid},0|0|0|2|0|14,5,0,0,0,0,0,0,0,0,0,100,0,0|7,5,0,0,0,0,0,0,0,0,0,100,0,0|`);
 	await sleep(500);

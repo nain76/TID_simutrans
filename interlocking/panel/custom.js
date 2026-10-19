@@ -36,7 +36,7 @@ function customOf(st) {
 }
 // the custom panel is shown (this browser's choice, the custom panel when the station has one)
 function customView(st) {
-	if (cpEdit) return !cpEdit.pick;   // picking game tiles for a part: on the track plan
+	if (cpEdit && st && cpEdit.station === st.id) return !cpEdit.pick;   // picking game tiles for a part: on the track plan
 	if (!st || !st.parts || localStore("custom." + st.id) === "0") return false;
 	return !!customOf(st);
 }
@@ -453,7 +453,7 @@ function startEdit(st) {
 	const c = customOf(st);
 	// not a lock: somebody else (maybe of the same company) may be editing, the panel applied last wins
 	if (st.editing !== undefined && !confirm(`「${companyName(st.editing)}」の人がカスタム盤を編集中です（同じ会社の別の人かもしれません）。\n編集を始めますか？後から「適用」した方の内容になります。`)) return;
-	cpEdit = { parts: c ? JSON.parse(JSON.stringify(c.parts)) : makeDraft(st), sel: -1, dirty: !c, saves: panelSaves.get(st.id) || 0, undo: [], redo: [] };
+	cpEdit = { station: st.id, parts: c ? JSON.parse(JSON.stringify(c.parts)) : makeDraft(st), sel: -1, dirty: !c, saves: panelSaves.get(st.id) || 0, undo: [], redo: [] };
 	cpEdit.last = JSON.stringify(cpEdit.parts);
 	command(`cp_edit,${st.id},1`, "カスタム盤の編集を開始");
 	render();

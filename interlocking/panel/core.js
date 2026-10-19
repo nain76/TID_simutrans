@@ -237,10 +237,7 @@ async function rotateAreas() {
 
 async function refreshStatus() {
 	status = await api("/api/status");
-	if (!station() && status.stations.length) {
-		stationId = status.stations[0].id;
-		localStore("station", stationId);
-	}
+	if (!station() && status.stations.length) selectStation(status.stations[0].id, true);
 }
 async function refreshTracks() {
 	const a = currentArea();

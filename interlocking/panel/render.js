@@ -430,9 +430,9 @@ function renderRun() {
 	// approach indication: a train holds an interlocked signal at danger
 	// the line (路線) of the train names its type (普通・快速 …): shown first, then the train and its next stop
 	const train = (x) => `${lineBadge(x.line)}${esc(x.train)}${x.dest ? ` <span class="hint">次 ${esc(x.dest)}</span>` : ""}`;
-	const waiting = st.signals.filter(s => s.train && s.aspect === "red").map(s => `<div>${signalLabel(st, s.pos)}：${train(s)} 待機中</div>`);
+	const waiting = st.signals.filter(s => s.train && s.aspect === "red").map(s => `<div>${esc(signalLabel(st, s.pos))}：${train(s)} 待機中</div>`);
 	const leaving = (st.departures || []).filter(d => d.train && d.waiting && !status.routes.some(r => key(r.start) === key(d.pos) && r.state !== "idle"))
-		.map(d => `<div>${signalLabel(st, d.pos)}：${train(d)} ${d.shunt ? "入換待ち" : "発車待ち"}</div>`);
+		.map(d => `<div>${esc(signalLabel(st, d.pos))}：${train(d)} ${d.shunt ? "入換待ち" : "発車待ち"}</div>`);
 	ap.innerHTML = waiting.concat(leaving).join("") || `<span class="hint">待っている列車はありません</span>`;
 
 	// routes that are set or occupied
@@ -484,7 +484,7 @@ function renderRun() {
 		const s = sig(k);
 		const startPos = rs[0].start;
 		const asp = s ? "現示：" + { green: "進行", red: "停止", yellow: "注意", missing: "なし" }[s.aspect] : isDepartureAnchor(st, startPos) ? ((st.departures.find(d => key(d.pos) === key(startPos)) || {}).shunt ? "仮想入換信号" : "仮想出発信号") : "";
-		html += `<div class="group" data-sig="${k}"><div class="group-title">${signalLabel(st, startPos)}　${asp}</div>`;
+		html += `<div class="group" data-sig="${k}"><div class="group-title">${esc(signalLabel(st, startPos))}　${asp}</div>`;
 		for (const r of rs) {
 			const busy = [...pending.keys()].some(c => c === "set," + r.id || c === "cancel," + r.id);
 			const chip = busy ? `<span class="chip busy">扱い中…</span>` :
@@ -542,7 +542,7 @@ function renderChecks(st) {
 		let cls, msg, acts = "";
 		if (e.ex.targets.length) { cls = "warn"; msg = "⚠ 信号を通らずにホームへ入れます。ゲーム内で、この線路に駅へ向かう信号を置いてください。"; }
 		else if (e.unregistered.length && !e.registered.length) { cls = "warn"; msg = "⚠ 入口の信号が未登録です。"; acts = e.unregistered.map(t => sigBtn(t, false)).join(""); }
-		else { cls = "ok"; msg = "✔ " + e.registered.map(t => signalLabel(st, t.p)).join("・") + " で管理しています"; acts = e.registered.map(t => sigBtn(t, true)).join(""); }
+		else { cls = "ok"; msg = "✔ " + e.registered.map(t => esc(signalLabel(st, t.p))).join("・") + " で管理しています"; acts = e.registered.map(t => sigBtn(t, true)).join(""); }
 		return `<div class="check ${cls}" data-prev="${e.ex.tiles.join(";")}"><div class="head"><b>${title}</b></div><div class="msg">${msg}</div><div class="acts">${acts}</div></div>`;
 	}).join("") || `<span class="hint">外から入ってくる線路は見つかりませんでした。</span>`;
 
@@ -550,8 +550,8 @@ function renderChecks(st) {
 		const title = `${x.group + 1}番線 ${dirName(x.dir)}側` + (x.deadEnd ? `<span class="tag">行き止まり</span>` : "");
 		let cls, msg, acts = "";
 		const depBtn = x.dep ? `<button data-depdel="${key(x.end.p)}">仮想出発信号を解除</button>` : `<button data-depadd="${key(x.end.p)}">仮想出発信号にする</button>`;
-		if (x.dep) { cls = "ok"; msg = `✔ 仮想出発信号（${signalLabel(st, x.end.p)}）で管理しています`; acts = depBtn; }
-		else if (x.registered.length) { cls = "ok"; msg = "✔ 出発信号 " + x.registered.map(t => signalLabel(st, t.p)).join("・") + " で管理しています"; acts = x.registered.map(t => sigBtn(t, true)).join(""); }
+		if (x.dep) { cls = "ok"; msg = `✔ 仮想出発信号（${esc(signalLabel(st, x.end.p))}）で管理しています`; acts = depBtn; }
+		else if (x.registered.length) { cls = "ok"; msg = "✔ 出発信号 " + x.registered.map(t => esc(signalLabel(st, t.p))).join("・") + " で管理しています"; acts = x.registered.map(t => sigBtn(t, true)).join(""); }
 		else if (x.unregistered.length && !x.ex.targets.length) { cls = "warn"; msg = "⚠ 出発信号が未登録です。信号を登録するか、仮想出発信号にしてください。"; acts = x.unregistered.map(t => sigBtn(t, false)).join("") + depBtn; }
 		else { cls = "warn"; msg = "⚠ 出発信号がありません。仮想出発信号にしてください。"; acts = depBtn; }
 		if (x.oneway && !x.dep) {
@@ -707,7 +707,7 @@ function renderSetup() {
 		const on = st.signals.some(s => key(s.pos) === key(t.p));
 		let head = "";
 		if (sortMode === "owner" && t.s.o !== lastOwner) { lastOwner = t.s.o; head = `<div class="owner">${esc(companyName(t.s.o))}</div>`; }
-		return head + `<div class="item" data-hsig="${key(t.p)}"><span>${on ? "<b>" + signalLabel(st, t.p) + "</b> " : ""}(${t.p.join(", ")}) <span class="hint">${layerName(t.p[2])}${sortMode === "pos" ? "・" + esc(companyName(t.s.o)) : ""}</span></span>
+		return head + `<div class="item" data-hsig="${key(t.p)}"><span>${on ? "<b>" + esc(signalLabel(st, t.p)) + "</b> " : ""}(${t.p.join(", ")}) <span class="hint">${layerName(t.p[2])}${sortMode === "pos" ? "・" + esc(companyName(t.s.o)) : ""}</span></span>
 			<button data-sig="${key(t.p)}">${on ? "解除" : "登録"}</button></div>`;
 	}).join("") : `<span class="hint">表示中の線路に信号がありません（上の表示の切り替えも確認してください）</span>`;
 	// rebuilt only when it changes, so that the item under the mouse stays

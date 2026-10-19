@@ -318,6 +318,21 @@ try {
 	check(true, "switching relay / electronic shows the settings of the new kind at once");
 	await page.click("nav button[data-tab=run]");
 
+	console.log("[12] switching the station while editing: the editing ends, nothing goes to the other station");
+	await cmd("st_new,Other"); await sleep(800);
+	const oid = (await st()).stations.find(x => x.name === "Other").id;
+	await page.click("#viewbar button[data-cp=edit]");
+	await waitFor(async () => (await st()).stations[0].editing !== undefined, 5000, "editing");
+	await page.evaluate(() => { cpEdit.dirty = true; nxStart = { pos: [3, 5, 0] }; depTool = "D"; });
+	await page.selectOption("#stationSel", String(oid));   // the question about unsaved changes is answered "yes"
+	await sleep(1200);
+	const sw = await page.evaluate(() => ({ edit: cpEdit, nx: nxStart, dt: depTool, id: stationId }));
+	check(sw.edit === null && sw.nx === null && sw.dt === null && sw.id === oid, "editing, the chosen lever and the tool end with the switch");
+	const ss = (await st()).stations;
+	check(ss[0].editing === undefined && !ss.find(x => x.id === oid).parts, "the old station is no longer marked as edited, the new one got no parts");
+	await page.selectOption("#stationSel", String(sid));
+	await cmd(`st_del,${oid}`); await sleep(800);
+
 	console.log("[6] back to the track plan, and no custom panel any more");
 	await page.click("#viewbar button[data-cp=auto]");
 	await waitFor(async () => (await page.locator("#map [data-part]").count()) === 0, 5000, "track plan");

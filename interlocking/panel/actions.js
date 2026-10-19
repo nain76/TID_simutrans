@@ -71,17 +71,17 @@ async function newStation() {
 	const h = halts.find(x => x.id === Number(document.getElementById("haltSel").value));
 	if (!h) { toast("駅を選んでください"); return; }
 	const has = status.stations.find(s => s.view && s.view[4] === h.id);
-	if (has) { toast(`「${h.name}」にはもう連動盤があります（上の駅の一覧から選べます）`, true); stationId = has.id; localStore("station", stationId); render(); return; }
+	if (has) { toast(`「${h.name}」にはもう連動盤があります（上の駅の一覧から選べます）`, true); if (selectStation(has.id)) render(); return; }
 	const area = boxAround(h.tiles, 10);
 	area.halt = h.id;
-	const got = new Promise((resolve) => { pendingStation = resolve; setTimeout(() => resolve(null), 15000); });
+	// the station made by this command (in a network game, somebody else may make one at the same time)
+	const got = new Promise((resolve) => { pendingStation = (ev) => { if (ev.name === h.name) resolve(ev); }; setTimeout(() => resolve(null), 15000); });
 	command(`st_newh,${h.tiles[0].join(":")},${h.name}`, "連動駅の作成 " + h.name);
 	const ev = await got;
 	pendingStation = null;
 	if (!ev) return;
 	setArea(ev.id, area);
-	stationId = ev.id;
-	localStore("station", stationId);
+	selectStation(ev.id, true);
 	await refreshStatus();
 	await refreshTracks();
 	toast(`「${h.name}」を作成しました。次に場内・出発信号を登録してください`, true);
@@ -205,10 +205,26 @@ function log(text, cls) {
 	while (l.childNodes.length > 300) l.removeChild(l.lastChild);
 }
 
+// another station chosen: whatever was going on for the old one ends, so that no click or command meant for
+// it goes to the new one (an unsaved custom panel is asked about first; force: no question, it is dropped)
+function selectStation(id, force = false) {
+	if (id === stationId) return true;
+	if (cpEdit) {
+		if (!force && cpEdit.dirty && !confirm("カスタム盤を編集中です。適用していない変更を捨てて、駅を切り替えますか？")) return false;
+		const old = status.stations.find(s => s.id === stationId);
+		if (old) endEdit(old); else cpEdit = null;
+	}
+	stationId = id;
+	localStore("station", id);
+	selectedSignal = nxStart = relaySel = hoverRoute = manualRoute = depTool = markTool = openMemo = checkPreview = null;
+	lastWaiting = new Set();
+	stopRinging();
+	// parts of the page kept while their HTML is unchanged: their handlers belong to the old station
+	for (const e of document.querySelectorAll("[data-html]")) delete e.dataset.html;
+	return true;
+}
 document.getElementById("stationSel").addEventListener("change", (e) => {
-	stationId = Number(e.target.value);
-	localStore("station", stationId);
-	selectedSignal = null;
+	if (!selectStation(Number(e.target.value))) { e.target.value = stationId; return; }
 	refreshTracks().then(render);
 });
 for (const b of document.querySelectorAll("#modeBox button")) b.addEventListener("click", () => {
