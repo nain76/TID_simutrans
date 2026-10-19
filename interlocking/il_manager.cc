@@ -584,7 +584,13 @@ bool interlocking_manager_t::may_operate(const il_station_t *st, const player_t 
 
 bool interlocking_manager_t::may_manage(const il_station_t *st, const player_t *player) const
 {
-	return player_t::check_owner(world()->get_player(st->owner), player);
+	const player_t *owner = world()->get_player(st->owner);
+	if(  owner == NULL  ) {
+		// the company is gone (bankrupt): only the public service may manage the station
+		// (check_owner lets everybody manage what has no owner)
+		return player  &&  player == world()->get_public_player();
+	}
+	return player_t::check_owner(owner, player);
 }
 
 
@@ -1728,7 +1734,9 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 			error = "not owner";
 		}
 		else if(  cmd[0] == 's'  ) {
-			error = !st->manual ? "station is in automatic mode" : st->kind == IL_RELAY ? "use the levers on a relay panel" : cmd_set(r);
+			error = !st->manual ? "station is in automatic mode" : st->kind == IL_RELAY ? "use the levers on a relay panel" :
+				// a shortcut has no shunting indicator: up to a standing train only with the green or pink lever (set_path)
+				ends_behind_train(r) ? "only a shunting indicator lever leads up to a standing train" : cmd_set(r);
 		}
 		else {
 			error = cmd_cancel(r);
@@ -2207,7 +2215,14 @@ void interlocking_manager_t::rescan_station(il_station_t *st)
 		if(  anchor != d->anchor  ) {
 			move_start_point(st, d->anchor, anchor);
 			FOR(vector_tpl<il_route_t *>, r, routes) {
-				if(  r->station == st->id  &&  r->tiles[0] == d->anchor  &&  r->state == IL_IDLE  ) {
+				if(  r->station != st->id  ||  r->tiles[0] != d->anchor  ) {
+					continue;
+				}
+				if(  r->state == IL_SET  ||  r->state == IL_RELEASING  ) {
+					// set from the old end: it would lock its points for ever (nothing starts there any more)
+					set_route_state(r, IL_IDLE);
+				}
+				if(  r->state == IL_IDLE  ) {
 					r->tiles[0] = anchor; // re-routed below
 				}
 			}
@@ -2940,6 +2955,8 @@ void interlocking_manager_t::rdwr(loadsave_t *file)
 
 // format of the data block (independent of IL_SAVE_VERSION, which belongs to the old format)
 #define IL_BLOCK_VERSION 17
+// far more than any station needs (a few hundred kilobytes for a large game)
+#define IL_MAX_BLOCK (64u * 1024u * 1024u)
 
 void interlocking_manager_t::save_block(loadsave_t *file)
 {
@@ -2958,6 +2975,12 @@ void interlocking_manager_t::load_block(loadsave_t *file)
 	il_blob_t b(true);
 	uint32 len = 0;
 	file->rdwr_long(len);
+	if(  len > IL_MAX_BLOCK  ) {
+		// a damaged length: reading on would run past the end of the file (which stops the game)
+		dbg->error("interlocking_manager_t::load_block()", "damaged interlocking data (length %u), ignored", len);
+		reset();
+		return;
+	}
 	for(  uint32 i = 0;  i < len;  i++  ) {
 		uint8 v = 0;
 		file->rdwr_byte(v);

@@ -53,6 +53,10 @@ def run(args):
               and not ev["routes_rerouted"] and not ev["routes_broken"] and not ev["routes_removed"], f"nothing to do: {ev}")
 
         print("[2] platform 1 shortened at its east end")
+        # the route out of platform 1 is set: its start moves, so it is taken back and re-routed
+        check(p.cmd(f"st_mode,{sid},1")["ok"], "operator mode")
+        out0 = next(r for r in p.status()["routes"] if r["name"] == "out")
+        check(p.cmd(f"set,{out0['id']}")["ok"], "the route out of platform 1 is set")
         r = p.request(f"debug_work {general_tool_id('TOOL_REMOVER')} 8,5,0")
         check(r.get("ok"), f"stop removed at (8,5) ({r})")
         ev = rescan()
@@ -62,7 +66,7 @@ def run(args):
         check(st["shunt_levers"] == [{"pos": [7, 5, 0], "color": "G"}], f"its shunting lever moved with it: {st['shunt_levers']}")
         out = next(r for r in p.status()["routes"] if r["name"] == "out")
         check(ev["routes_rerouted"] == ["out"] and out["tiles"][0] == [7, 5, 0] and out["tiles"][-1] == [13, 5, 0], f"route re-routed from (7,5): {out['tiles']}")
-        check(p.cmd(f"st_mode,{sid},1")["ok"], "operator mode")
+        check(out["state"] == "idle", f"the route set from the old end was taken back ({out['state']})")
         res = p.cmd(f"set,{out['id']}")
         check(res["ok"] and p.cmd(f"cancel,{out['id']}")["ok"], f"the re-routed route can be set ({res.get('error')})")
 

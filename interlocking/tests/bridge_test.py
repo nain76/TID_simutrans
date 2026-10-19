@@ -8,7 +8,7 @@ Robustness of the bridge (the connection of the panel to the game), scenario il-
 
 Usage: bridge_test.py --sim build/default/sim --workdir <dir>
 """
-import argparse, os, socket, subprocess, sys, time, urllib.request
+import argparse, os, socket, subprocess, sys, time, urllib.error, urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_test import Panel, check, start_game, wait_until, PORT
 
@@ -57,6 +57,18 @@ def run(args):
         except OSError:
             dropped = True
         check(dropped, "the client that did not read was dropped")
+
+        print("[3] a command longer than the game takes")
+        p.send("cmd st_new," + "x" * 5000)
+        err = p.answers.get(timeout=10)
+        check(err.get("error") == "command too long", f"refused, not cut off ({err})")
+        try:
+            urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/api/cmd", data=("st_new," + "y" * 5000).encode(), headers={"X-IL-Panel": "1"}), timeout=10)
+            check(False, "the panel's long command was taken")
+        except urllib.error.HTTPError as e:
+            check(e.code == 400 and b"command too long" in e.read(), "the panel gets the reason, too")
+        time.sleep(1)
+        check(not p.status()["stations"], "no station was made from a cut-off command")
     finally:
         game.terminate()
         try:

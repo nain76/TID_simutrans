@@ -185,9 +185,10 @@ inline void il_blob_t::end_section()
 	sections.pop_back();
 	if(  loading  ) {
 		// skip what a newer version added to this section
-		if(  mark > data.get_count()  ) {
+		if(  mark > data.get_count()  ||  pos > mark  ) {
+			// the section is longer than the data, or more was read than it holds: the data is damaged
 			broken = true;
-			pos = data.get_count();
+			pos = min(mark, data.get_count());
 		}
 		else {
 			pos = mark;

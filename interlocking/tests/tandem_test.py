@@ -78,6 +78,13 @@ def run(args):
         check(not res["ok"], f"a route to the far end is refused while A stands there ({res.get('error')})")
         res = p.cmd(f"set_path,{sid},{into(free_y)},B")
         check(not res["ok"] and res["error"] == "only a shunting indicator lever leads up to a standing train", f"the signal lever does not lead up to the standing train ({res.get('error')})")
+        if not relay:
+            # nor does a shortcut (a route kept in the station, set with "set")
+            check(p.cmd(f"rt_path,{sid},{into(free_y)},short")["ok"], "a shortcut up to the standing train")
+            sc = next(x for x in p.status()["routes"] if x["name"] == "short")
+            res = p.cmd(f"set,{sc['id']}")
+            check(not res["ok"] and res["error"] == "only a shunting indicator lever leads up to a standing train", f"the shortcut is refused, too ({res.get('error')})")
+            check(p.cmd(f"rt_del,{sc['id']}")["ok"], "shortcut removed")
         back("M")
         turn("S")
         check(p.cmd(f"{'set_path' if relay else 'set_path_s'},{sid},{into(free_y)},B")["ok"], f"route S1 -> (12,{free_y}) in front of A with the {args.lever} lever")

@@ -39,6 +39,9 @@ const ERRORS = {
 	"the point is locked": "このポイントは鎖錠中です（進路が通っているか在線中）",
 	"no point at this position": "その位置にポイントがありません",
 	"bad point lever": "転てつてこの指定が正しくありません",
+	"command too long": "命令が長すぎます",
+	"company is locked": "ゲームで会社のパスワードが入力されていません（ゲーム画面で会社のパスワードを入れてください）",
+	"game not ready": "ゲームの準備ができていません",
 	"platform already registered": "この番線・線路はすでに登録されています",
 	"platform belongs to another station": "別の連動駅の番線・線路です",
 	"platform not registered": "この番線・線路は登録されていません",
@@ -164,7 +167,11 @@ async function command(cmd, label) {
 	render();
 	try {
 		const r = await fetch("/api/cmd", { method: "POST", headers: { "X-IL-Panel": "1", "Content-Type": "text/plain; charset=utf-8" }, body: cmd });
-		if (!r.ok) throw new Error("HTTP " + r.status);
+		if (!r.ok) {
+			let why = "HTTP " + r.status;
+			try { why = tr((await r.json()).error) || why; } catch (e) {}
+			throw new Error(why);
+		}
 	} catch (e) {
 		pending.delete(cmd);
 		for (const [k, a] of shownAhead) if (a.cmd === cmd) shownAhead.delete(k);

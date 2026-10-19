@@ -222,18 +222,27 @@ static void send_http_error(client_t &c, int code, const char *text)
 // ---------------------------------------------------------------------------
 
 /// queues an interlocking command; the result arrives as {"type":"result"} event
-static bool run_command(const char *param)
+/// NULL, or why the command was not sent to the game
+static const char *run_command(const char *param)
 {
 	tool_t *tool = tool_t::simple_tool[TOOL_INTERLOCKING];
 	karte_t *welt = world();
 	if(  tool == NULL  ||  welt == NULL  ) {
-		return false;
+		return "game not ready";
+	}
+	if(  strlen(param) >= sizeof(tool_param)  ) {
+		// cut off, it would do something else (on every client alike)
+		return "command too long";
+	}
+	if(  !welt->player_can_act_unrestricted(welt->get_active_player())  ) {
+		// the game would ask for the password of the company in its own window: the panel would get no answer
+		return "company is locked";
 	}
 	strncpy(tool_param, param, sizeof(tool_param) - 1);
 	tool_param[sizeof(tool_param) - 1] = 0;
 	tool->set_default_param(tool_param);
 	welt->set_tool(tool, welt->get_active_player());
-	return true;
+	return NULL;
 }
 
 
@@ -275,8 +284,10 @@ static void handle_line(client_t &c, char *line)
 	int x1, y1, x2, y2;
 
 	if(  strncmp(line, "cmd ", 4) == 0  ) {
-		if(  !run_command(line + 4)  ) {
-			send_line(c, "{\"type\":\"error\",\"error\":\"game not ready\"}");
+		if(  const char *err = run_command(line + 4)  ) {
+			cbuffer_t e;
+			e.printf("{\"type\":\"error\",\"error\":\"%s\"}", err);
+			send_line(c, e);
 		}
 		return;
 	}
@@ -362,8 +373,13 @@ static void handle_line(client_t &c, char *line)
 	}
 	else if(  getenv("TID_IL_DEBUG")  &&  strncmp(line, "debug_save ", 11) == 0  ) {
 		// test helper (only with TID_IL_DEBUG set): save the game into the save folder
+		// a plain name only (it is put into the save folder)
+		bool plain = line[11] != 0;
+		for(  const char *q = line + 11;  *q;  q++  ) {
+			plain &= (*q >= 'a'  &&  *q <= 'z')  ||  (*q >= 'A'  &&  *q <= 'Z')  ||  (*q >= '0'  &&  *q <= '9')  ||  *q == '_'  ||  *q == '-';
+		}
 		cbuffer_t fn;
-		fn.printf(SAVE_PATH_X "%s.sve", line + 11);
+		fn.printf(SAVE_PATH_X "%s.sve", plain ? line + 11 : "il_debug");
 		world()->save(fn, false, SAVEGAME_VER_NR, true);
 		answer.append("{\"type\":\"debug_save\",\"ok\":true}");
 	}
@@ -599,8 +615,8 @@ static void handle_http(client_t &c, char *head, const char *body)
 			return;
 		}
 		if(  strcmp(target, "/api/cmd") == 0  ) {
-			if(  !run_command(body)  ) {
-				send_http_error(c, 400, "game not ready");
+			if(  const char *err = run_command(body)  ) {
+				send_http_error(c, 400, err);
 				return;
 			}
 			json.append("{\"type\":\"queued\",\"ok\":true}");
