@@ -166,7 +166,7 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 - Windows 版のビルド: `simres.rc` が作り直しになったとき、この環境の windres は `--preprocessor "<コマンド 引数…>"` の形を
   受け付けなかった（本体の `common.mk` の書き方）。本体は変えず、次のように手で作ってから `make CFG=win64` した:
   `x86_64-w64-mingw32-windres --preprocessor=x86_64-w64-mingw32-g++ --preprocessor-arg=-E --preprocessor-arg=-xc --preprocessor-arg=-DRC_INVOKED -DREVISION=0 -O COFF simres.rc build/win64/simres.o`
-- `interlocking/` 側の変更: なし。
+- `interlocking/` 側の変更: なし。全テスト（Python 17 本・ブラウザ 3 本）が通ることを確認。
 
 ### v50.2 → v62.0.3（2026-10）
 
