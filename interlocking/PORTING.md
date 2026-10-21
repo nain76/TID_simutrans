@@ -155,6 +155,19 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 
 ## 移植の記録
 
+### v62.0.3 → v62.3（2026-10）
+
+- 方法: 本家のタグ `v62_3` をマージ。
+  `git fetch https://github.com/teamhimeh/simutrans refs/tags/v62_3:refs/tags/otrp-v62_3` → `git merge otrp-v62_3`
+- 衝突: H6 の 2 か所（`simmenu.h` のツール番号、`simmenu.cc` のツール生成）だけ。本家が `TOOL_EXPORT_MINIMAP`・
+  `TOOL_HALT_PERMISSION` を足したので、`TOOL_INTERLOCKING` はその**後ろ**（最後の simple tool）に置いた。
+  本家のツール番号（`menuconf.tab` が使う）は本家と同じまま。
+- セーブ形式: `OTRP_VERSION_MAJOR` は 62 のまま（本家の v62.0.3 と v62.3 のセーブは互いに読める）。連動盤のデータは変更なし。
+- Windows 版のビルド: `simres.rc` が作り直しになったとき、この環境の windres は `--preprocessor "<コマンド 引数…>"` の形を
+  受け付けなかった（本体の `common.mk` の書き方）。本体は変えず、次のように手で作ってから `make CFG=win64` した:
+  `x86_64-w64-mingw32-windres --preprocessor=x86_64-w64-mingw32-g++ --preprocessor-arg=-E --preprocessor-arg=-xc --preprocessor-arg=-DRC_INVOKED -DREVISION=0 -O COFF simres.rc build/win64/simres.o`
+- `interlocking/` 側の変更: なし。
+
 ### v50.2 → v62.0.3（2026-10）
 
 - 方法: 本家のタグ `v62_0_3` をこのブランチにマージ（このリポジトリの main は本家の履歴の途中なので、共通の祖先がある）。
