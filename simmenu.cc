@@ -174,6 +174,7 @@ const char *tool_t::id_to_string(uint16 id)
 		CASE_TO_STRING(TOOL_INTERLOCKING); // TID_IL H6
 		CASE_TO_STRING(UNUSED_TOOL_ADD_MESSAGE);
 		CASE_TO_STRING(UNUSED_WKZ_PWDHASH_TOOL);
+		CASE_TO_STRING(TOOL_EXPORT_MINIMAP);
 		}
 	}
 	else if (id & DIALOGE_TOOL) {
@@ -364,6 +365,7 @@ tool_t *create_simple_tool(int toolnr)
 		case TOOL_SHOW_WAY_OFFSET_LABEL: tool = new tool_show_way_offset_label_t(); break;
 		case TOOL_SHOW_ONLY_OWN_VEHICLE_STATES:		tool = new tool_only_own_vehicle_states_t(); break;
 		case TOOL_FOLLOW_CONVOI_UNDERGROUND:		tool = new tool_follow_convoi_underground_t(); break;
+		case TOOL_EXPORT_MINIMAP:      tool = new tool_export_minimap_t(); break;
 		case TOOL_INTERLOCKING:      tool = new tool_interlocking_t(); break; // TID_IL H6
 		default:                    dbg->error("create_simple_tool()","cannot satisfy request for simple_tool[%i]!",toolnr);
 		                            return NULL;
