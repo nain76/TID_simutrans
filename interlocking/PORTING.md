@@ -155,6 +155,13 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 
 ## 移植の記録
 
+### v62.3 → v62.4.1（2026-10）
+
+- 方法: `git fetch https://github.com/teamhimeh/simutrans refs/tags/v62_4_1:refs/tags/otrp-v62_4_1` → `git merge otrp-v62_4_1`
+- 衝突なし。`TOOL_INTERLOCKING` は最後の simple tool のまま。フックの位置もそのまま。
+- 本家の変更のうち連動盤に関係しそうなもの: 連結の子列車の扱いの修正（#778）、停車位置の長さの計算（#777）。連結のテストで確認する。
+- Windows 版のビルド: v62.3 のときと同じく `simres.o` を手で作ってから `make CFG=win64`。
+
 ### v62.0.3 → v62.3（2026-10）
 
 - 方法: 本家のタグ `v62_3` をマージ。
