@@ -45,6 +45,7 @@ while p.request("debug_convoys")["convoys"][0]["stop"] != 1: time.sleep(0.5)
 `], { stdio: "inherit" });
 	const browser = await playwright.chromium.launch({ executablePath: process.env.CHROMIUM || undefined });
 	const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+	page.on("pageerror", e => { console.log("PAGE ERROR:", e.message); failed = true; });
 	await page.goto(BASE + "/");
 	await page.waitForSelector("#conndot.ok");
 	await page.click("nav button[data-tab=setup]");

@@ -357,6 +357,8 @@ function renderCustom() {
 		drawMarkTargets(g, targets, sc);
 	}
 	if (cpEdit) bindEditor(svg, g, G);
+	// not editing: the editor's mouse handlers must not stay on the drawing (they need cpEdit)
+	else svg.onmousedown = svg.onmousemove = svg.onmouseup = svg.ondblclick = null;
 }
 
 // a start lever: on a relay panel the rotary lever, else the signal button (shunting lever: a small square)

@@ -28,7 +28,7 @@ try {
 	const browser = await playwright.chromium.launch({ executablePath: process.env.CHROMIUM || undefined });
 	const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 	page.on("dialog", d => d.accept());
-	page.on("pageerror", e => console.log("PAGE ERROR:", e.message));
+	page.on("pageerror", e => { console.log("PAGE ERROR:", e.message); failed = true; });
 	await page.goto(BASE + "/");
 	await page.waitForSelector("#conndot.ok");
 	await page.evaluate(() => { const h = halts.find(x => x.tiles.some(t => t.join(",") === "13,5,0")); setArea(station().id, Object.assign(boxAround(h.tiles.concat([[3, 5, 0], [4, 7, 0]]), 2), { halt: h.id })); });

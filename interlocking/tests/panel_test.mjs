@@ -23,6 +23,7 @@ const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..",
 fs.mkdirSync(shots, { recursive: true });
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+let pageErrors = 0;   // an error in the panel's script fails the test (the poll loop would hide it)
 function check(cond, text) {
 	console.log((cond ? "  OK   " : "  FAIL ") + text);
 	if (!cond) throw new Error(text);
@@ -76,7 +77,7 @@ try {
 	console.log("[1] panel loads");
 	browser = await playwright.chromium.launch({ executablePath: process.env.CHROMIUM || undefined });
 	const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-	page.on("pageerror", (e) => console.log("  page error:", e.message));
+	page.on("pageerror", (e) => { console.log("  PAGE ERROR:", e.message); pageErrors++; });
 	await page.goto(BASE + "/");
 	await page.waitForSelector("#conndot.ok");
 	check(true, "panel connected to the game");
@@ -536,6 +537,7 @@ try {
 	await page.screenshot({ path: path.join(shots, "7_relay_turned.png") });
 	for (let i = 0; i < 3; i++) { await sleep(1500); const r0 = (await stA()).rot; await page.click("#viewbar button[data-rot]"); await waitFor(async () => (await stA()).rot === ((r0 + 1) & 3), 10000, "turn"); }
 	check((await stA()).rot === 0, "four turns: back to 0");
+	check(pageErrors === 0, `no error in the panel's script (${pageErrors})`);
 	console.log("ALL PANEL TESTS PASSED");
 }
 catch (e) {
