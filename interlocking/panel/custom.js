@@ -244,6 +244,23 @@ function renderCustom() {
 			if ((p.b || []).some(t => { const tt = tileIndex.get(key(t)); return tt && tt.c; })) color = "var(--occupied)";
 			el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: bad ? "#5a6475" : color, "stroke-width": 6 * sc, "stroke-linecap": "round", "stroke-dasharray": bad ? "6 5" : "" }, grp);
 			if (cpEdit) el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: "transparent", "stroke-width": 14 }, grp);
+			// a start chosen: the line is a via button (経由) when a route may take it
+			const start = !cpEdit && tab === "run" ? currentStart() : null;
+			if (start && (p.b || []).length) {
+				const vias = viasOf(start), cand = viaCandidates(start);
+				const keys = p.b.map(key);
+				const n = vias.findIndex(k => keys.includes(k));
+				const pick = keys.find(k => cand.has(k));
+				if (n >= 0 || pick) {
+					const vx = X((p.x1 + p.x2) / 2), vy = Y((p.y1 + p.y2) / 2), vr = 5.5 * Math.max(.8, sc);
+					const vg = el("g", { class: "clickable via" + (n >= 0 ? " on" : ""), "data-via": n >= 0 ? vias[n] : pick }, grp);
+					el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: "transparent", "stroke-width": 14 }, vg);
+					el("circle", { cx: vx, cy: vy, r: vr + 1.5, fill: n >= 0 ? "var(--yellow)" : "#2b3342", stroke: "var(--yellow)", "stroke-width": 1.5 }, vg);
+					el("text", { x: vx, y: vy + vr * .55, "font-size": vr * 1.5, "font-weight": 700, "text-anchor": "middle", fill: n >= 0 ? "#1a1a1a" : "var(--yellow)", "pointer-events": "none" }, vg).textContent = n >= 0 ? String(n + 1) : "経";
+					vg.appendChild(el("title", {})).textContent = n >= 0 ? `経由 ${n + 1}（押すと外す）` : "経由ボタン：押すと、この線路を通る進路だけになります";
+					vg.addEventListener("click", (e) => { e.stopPropagation(); viaClicked((n >= 0 ? vias[n] : pick).split(",").map(Number)); });
+				}
+			}
 		}
 		else if (p.t === "P") {
 			const pi = layout.points.findIndex(pt => p.b[0] && key(pt.t.p) === key(p.b[0]));

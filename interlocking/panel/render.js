@@ -178,7 +178,7 @@ function renderMap() {
 			el("text", { x: cx(t.p), y: cy(t.p) + 4, "font-size": 11 * sc, "text-anchor": "middle", fill: "#e6e9ee" }, g).textContent = "車";
 		}
 		// a click target for creating routes by hand
-		const hit = el("rect", { x: cx(t.p) - CELL / 2, y: cy(t.p) - CELL / 2, width: CELL, height: CELL, fill: "transparent", class: manualRoute || depTool ? "clickable" : "" }, g);
+		const hit = el("rect", { x: cx(t.p) - CELL / 2, y: cy(t.p) - CELL / 2, width: CELL, height: CELL, fill: "transparent", class: manualRoute || depTool || (tab === "run" && currentStart()) ? "clickable" : "" }, g);
 		hit.addEventListener("click", () => tileClicked(t));
 		hit.appendChild(el("title", {})).textContent = `(${t.p.join(", ")}) ${layerName(t.p[2])}` + (t.c ? " " + (tracks.convoys[t.c] || "") : "");
 	}
@@ -273,6 +273,21 @@ function renderMap() {
 		if (start) {
 			const t = tileIndex.get(key(start.pos));
 			if (t) el("circle", { cx: cx(t.p), cy: cy(t.p), r: 16 * sc, fill: "none", stroke: "var(--yellow)", "stroke-width": 3, class: "blink", "pointer-events": "none" }, g);
+			// via buttons (経由): behind each junction the route may take; the chosen ones lit and numbered
+			const vias = viasOf(start);
+			const cand = viaCandidates(start);
+			for (const k of vias) cand.add(k);
+			for (const k of cand) {
+				const vt = tileIndex.get(k);
+				if (!vt || !isVisible(vt)) continue;
+				const n = vias.indexOf(k);
+				const x = cx(vt.p), y = cy(vt.p), vr = 5.5 * Math.max(.8, sc);
+				const grp = el("g", { class: "clickable via" + (n >= 0 ? " on" : ""), "data-via": k }, g);
+				el("circle", { cx: x, cy: y, r: vr + 1.5, fill: n >= 0 ? "var(--yellow)" : "#2b3342", stroke: "var(--yellow)", "stroke-width": 1.5 }, grp);
+				el("text", { x, y: y + vr * .55, "font-size": vr * 1.5, "font-weight": 700, "text-anchor": "middle", fill: n >= 0 ? "#1a1a1a" : "var(--yellow)", "pointer-events": "none" }, grp).textContent = n >= 0 ? String(n + 1) : "経";
+				grp.appendChild(el("title", {})).textContent = n >= 0 ? `経由 ${n + 1}（押すと外す）` : "経由ボタン：押すと、この線路を通る進路だけになります（3 か所まで、押した順に通る）";
+				grp.addEventListener("click", (e) => { e.stopPropagation(); viaClicked(vt.p); });
+			}
 		}
 	}
 	// virtual departure signals: a square at the platform end
@@ -530,13 +545,14 @@ function renderRun() {
 	if (isRelay()) {
 		renderRelayBoard();
 		hint.innerHTML = !st.manual ? "CTC集中（自動）です。信号は通常どおり自動で動きます。扱うには「駅扱切換てこ」を駅扱にしてください。" :
-			"① <b>信号てこ</b>を開通方向（左・右）にひねる → ② 光った<b>着点ボタン</b>を押す と進路が取れます。ポイントは転換を終えてから鎖錠され、信号が進行になります。" +
+			"① <b>信号てこ</b>を開通方向（左・右）にひねる → ② 光った<b>着点ボタン</b>を押す と進路が取れます。通り道を選ぶときは、②の前に分岐の先の<b>「経」ボタン</b>（または線路）を押して経由を指定します。ポイントは転換を終えてから鎖錠され、信号が進行になります。" +
 			"列車の通過後もてこは反位のままです。次の進路の前に<b>定位に戻して</b>ください。列車の接近中にてこを戻すと、<b>時素</b>（本線 " + st.t_approach + " 秒・入換 " + st.t_shunt + " 秒）がたってから解けます。" +
 			"転てつてこは 左＝N（定位）・中央＝C（総括）・右＝R（反位）。";
 		return;
 	}
 	hint.innerHTML = !st.manual ? "自動モードです。信号は通常どおり自動で動きます。進路を扱うには上の「扱者」に切り替えてください。" :
-		nxStart ? `<b>${esc(signalLabel(st, nxStart.pos))}</b> を選択中。光っている<b>着点ボタン</b>を押すと進路が引けます（もう一度信号を押すと選択をやめます）。` :
+		nxStart ? `<b>${esc(signalLabel(st, nxStart.pos))}</b> を選択中。光っている<b>着点ボタン</b>を押すと進路が引けます（もう一度信号を押すと選択をやめます）。` +
+			`通り道を選ぶときは、先に分岐の先の<b>「経」ボタン</b>（または線路）を押して経由を指定します${viasOf(nxStart).length ? `（経由 ${viasOf(nxStart).length} か所を指定中）` : ""}。` :
 		"① 地図上の<b>信号てこ</b>（白枠の信号・四角の出発点・ひし形の入換信号）を押す → ② 光った<b>着点ボタン</b>（番線・留置線・出口）を押す と進路が引けます。ポイントは自動で転換されます。下の転てつてこで向きを固定すると、その向きの進路だけになります。設定中の進路は、同じ信号てこをもう一度押すと取り消せます。";
 }
 

@@ -5,6 +5,66 @@
 // operating: point levers, start lever + destination buttons
 // ---------------------------------------------------------------------------
 let nxStart = null;   // selected start lever: { pos, dep }
+// via points (経由) for the next route, in order: the route has to pass these tiles. They belong to the start
+// they were chosen for (viaFor) and are dropped when another start is chosen or the route is set.
+let viaTiles = [], viaFor = null;
+const startKey = (start) => start ? leverKey(start.pos, start.shunt) : null;
+const viasOf = (start) => start && viaFor === startKey(start) ? viaTiles : [];
+function clearVias() { viaTiles = []; viaFor = null; }
+// a click on a track tile while a start is chosen: it becomes a via point (again: it is dropped)
+function viaClicked(pos) {
+	const start = currentStart();
+	if (!start) return false;
+	const k = key(pos);
+	if (viaFor !== startKey(start)) { viaTiles = []; viaFor = startKey(start); }
+	if (k === key(start.pos)) return true;
+	if (viaTiles.includes(k)) viaTiles = viaTiles.filter(x => x !== k);
+	else if (viaTiles.length >= 3) { toast("経由は 3 か所までです", true); return true; }
+	else viaTiles.push(k);
+	if (viaTiles.length && !findDestinations(start).size) toast("この経由では、どの着点へも進路が引けません（線路の向き・ポイントを確認）", true);
+	render();
+	return true;
+}
+// tiles just behind a junction the route from this start may take, where some destination can still be
+// reached: offered as via buttons (worked out again only when the start, the track or the points change)
+let viaMemo = { sig: null, res: null };
+function viaCandidates(start) {
+	const sig = startKey(start) + "|" + tracksSig + "|" + JSON.stringify(pointLevers()) + "|" + viasOf(start).join(";");
+	if (viaMemo.sig !== sig) viaMemo = { sig, res: computeViaCandidates(start) };
+	return new Set(viaMemo.res);
+}
+function computeViaCandidates(start) {
+	const res = new Set();
+	const t0 = start && tileIndex.get(key(start.pos));
+	if (!t0 || !stationTiles) return res;
+	const levers = pointLevers();
+	const pointAt = new Map(layout.points.map(pt => [key(pt.t.p), pt]));
+	const seen = new Set();
+	const q = DIRS.filter(d => t0.m & d).map(d => ({ t: neighbour(t0, d), d })).filter(x => x.t);
+	while (q.length) {
+		const { t, d } = q.shift();
+		const k = key(t.p);
+		if (seen.has(k + "|" + d) || !stationTiles.has(k) || t.d) continue;
+		seen.add(k + "|" + d);
+		let exits = t.m & ~BACK[d];
+		const pt = pointAt.get(k);
+		if (pt) {
+			const prs = allowedPairs(pt, levers[k]);
+			if (prs) { let a = 0; for (const pr of prs) if (pr.includes(BACK[d])) a |= pr[0] === BACK[d] ? pr[1] : pr[0]; exits &= a; }
+		}
+		const outs = DIRS.filter(e => (exits & e) && neighbour(t, e));
+		for (const e of outs) {
+			const n = neighbour(t, e);
+			if (outs.length > 1 && stationTiles.has(key(n.p))) res.add(key(n.p));
+			q.push({ t: n, d: e });
+		}
+	}
+	// only where a route can go on to a destination (after the via points already chosen)
+	res.delete(key(start.pos));
+	const chosen = viasOf(start);
+	for (const k of [...res]) if (chosen.includes(k) || !findDestinations(start, chosen.concat([k])).size) res.delete(k);
+	return res;
+}
 // point lever positions are part of the game (saved, shared in network games)
 function pointLevers() {
 	const st = station();
@@ -77,7 +137,7 @@ function setLever(li, pos) {
  * track in the direction of travel and the manually set points. free = no train and no
  * other route on it.
  */
-function findDestinations(start) {
+function findDestinations(start, vias = viasOf(start)) {
 	const st = station();
 	const res = new Map(); // id -> { label, path, free }
 	const t0 = tileIndex.get(key(start.pos));
@@ -112,15 +172,18 @@ function findDestinations(start) {
 	};
 	for (const loose of [false, true]) {
 		const seen = new Set();
-		const q = firstDirs.map(d => ({ t: neighbour(t0, d), d, prev: { t: t0, prev: null } })).filter(x => x.t);
+		const q = firstDirs.map(d => ({ t: neighbour(t0, d), d, prev: { t: t0, prev: null }, v: 0 })).filter(x => x.t);
 		while (q.length) {
 			const cur = q.shift();
 			const t = cur.t, k = key(t.p);
-			const sk = k + "|" + cur.d;
+			// the via points passed so far (in their order): destinations only after the last one
+			if (cur.v < vias.length && k === vias[cur.v]) cur.v++;
+			const sk = k + "|" + cur.d + "|" + cur.v;
 			if (seen.has(sk)) continue;
 			seen.add(sk);
 			if (!stationTiles.has(k)) continue;
 			if (!loose && blocked.has(k)) continue;
+			const viasDone = cur.v === vias.length;
 			const pathTo = () => { const p = []; for (let n = cur; n; n = n.prev) p.unshift(n.t); return p; };
 			const record = (id, label, path, free = !loose) => { if (!res.has(id) || (free && !res.get(id).free)) { if (!res.has(id) || free) res.set(id, { label, path, free }); } };
 			// a platform or siding: to its far end; with a train standing on it also "up to the train" (手前)
@@ -130,26 +193,26 @@ function findDestinations(start) {
 				const entry = pathTo().length - 1;
 				if (allowShort && firstBlocked > entry && !(loose && res.has("n" + id))) record("n" + id, label + "手前", full.slice(0, firstBlocked), !loose);
 			};
-			if (layout.groupOf.has(k) && layout.groupOf.get(k) !== startGroup) {
+			if (layout.groupOf.has(k) && layout.groupOf.get(k) !== startGroup && viasDone) {
 				const gi = layout.groupOf.get(k);
 				target("p" + gi, platformName(st, gi), extend(pathTo(), cur.d, gi));
 				continue;
 			}
-			if (layout.sidingOf.has(k) && layout.sidingOf.get(k) !== startSiding) {
+			if (layout.sidingOf.has(k) && layout.sidingOf.get(k) !== startSiding && viasDone) {
 				const si = layout.sidingOf.get(k);
 				target("s" + si, sidingName(st, si), extend(pathTo(), cur.d, si, layout.sidings[si].tiles));
 				continue;
 			}
 			if (exitAt.has(k)) {
 				// a shunting lever leads to platforms, sidings and depots only
-				if (start.shunt && start.color !== "P") continue;
+				if (start.shunt && start.color !== "P" || !viasDone) continue;
 				const i = exitAt.get(k);
 				if (!(loose && res.has("x" + i))) record("x" + i, exitName(st, i), pathTo());
 				// the exit tile may also lead on (e.g. a junction at the edge): do not continue
 				continue;
 			}
 			if (t.d) {
-				if (!(loose && res.has("d" + k))) record("d" + k, "車庫", pathTo());
+				if (viasDone && !(loose && res.has("d" + k))) record("d" + k, "車庫", pathTo());
 				continue;
 			}
 			// direction of travel, points
@@ -167,7 +230,10 @@ function findDestinations(start) {
 			for (const e of DIRS) {
 				if (!(exits & e)) continue;
 				const n = neighbour(t, e);
-				if (n) q.push({ t: n, d: e, prev: cur });
+				if (!n) continue;
+				// with via points a search could go round and pass a track twice: a route never does
+				if (vias.length) { let again = false; for (let a = cur; a && !again; a = a.prev) again = a.t === n; if (again) continue; }
+				q.push({ t: n, d: e, prev: cur, v: cur.v });
 			}
 		}
 	}
@@ -192,6 +258,7 @@ function startClicked(pos, dep, sh = false) {
 		return;
 	}
 	nxStart = nxStart && key(nxStart.pos) === key(pos) && !!nxStart.shunt === sh ? null : { pos, dep, shunt: sh, color: sh ? shuntColor(st, pos) : null };
+	clearVias();
 	render();
 }
 
@@ -202,11 +269,12 @@ function destinationClicked(id) {
 	const d = findDestinations(start).get(id);
 	if (!d) { toast("この着点へは進路が引けません（線路の向き・ポイントを確認）"); return; }
 	if (!d.free) { toast("在線しているか、ほかの進路と重なるため引けません"); return; }
-	const name = `${signalLabel(st, start.pos)}${start.shunt ? (start.color === "P" ? "誘導" : "入換") : ""}→${d.label}`;
+	const name = `${signalLabel(st, start.pos)}${start.shunt ? (start.color === "P" ? "誘導" : "入換") : ""}→${d.label}${viasOf(start).length ? "（経由）" : ""}`;
 	// electronic panel: say that the shunting / calling-on lever of the start is used
 	const cmdName = !isRelay() && start.shunt ? "set_path_s" : "set_path";
 	command(`${cmdName},${st.id},${d.path.map(t => t.p.join(":")).join(";")},${name}`, "進路設定 " + name);
 	nxStart = null;
+	clearVias();
 	render();
 }
 

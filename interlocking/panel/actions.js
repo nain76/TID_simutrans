@@ -55,6 +55,7 @@ for (const b of document.querySelectorAll("[data-deptool]")) b.addEventListener(
 
 async function tileClicked(t) {
 	if (depToolClicked(t.p)) return;
+	if (tab === "run" && !manualRoute && viaClicked(t.p)) return;
 	if (!manualRoute || !manualRoute.start) return;
 	const st = station();
 	const start = manualRoute.start;
@@ -218,6 +219,7 @@ function selectStation(id, force = false) {
 	stationId = id;
 	localStore("station", id);
 	selectedSignal = nxStart = relaySel = hoverRoute = manualRoute = depTool = markTool = openMemo = checkPreview = null;
+	clearVias();
 	lastWaiting = new Set();
 	stopRinging();
 	// parts of the page kept while their HTML is unchanged: their handlers belong to the old station
@@ -282,7 +284,10 @@ document.getElementById("mapwrap").addEventListener("wheel", (e) => {
 	e.preventDefault();
 	setZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
 }, { passive: false });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && (manualRoute || depTool)) { manualRoute = null; depTool = null; render(); } });
+document.addEventListener("keydown", (e) => {
+	if (e.key === "Escape" && (manualRoute || depTool)) { manualRoute = null; depTool = null; render(); }
+	else if (e.key === "Escape" && viaTiles.length) { clearVias(); render(); }   // the via points are dropped first
+});
 
 (async () => {
 	try { halts = (await api("/api/halts")).halts; info = await api("/api/info"); } catch (e) {}
