@@ -155,6 +155,11 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 
 ## 移植の記録
 
+### v62.4.1 → v62.4.2（2026-10）
+
+- `git fetch https://github.com/teamhimeh/simutrans refs/tags/v62_4_2:refs/tags/otrp-v62_4_2` → `git merge otrp-v62_4_2`
+- 本家の変更は表示設定を開くと落ちる不具合の修正だけ（#784）。衝突なし。
+
 ### v62.3 → v62.4.1（2026-10）
 
 - 方法: `git fetch https://github.com/teamhimeh/simutrans refs/tags/v62_4_1:refs/tags/otrp-v62_4_1` → `git merge otrp-v62_4_1`
