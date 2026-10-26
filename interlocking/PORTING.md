@@ -62,6 +62,15 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 #endif
 ```
 
+### H9 取得関数（到着予測用） — `simconvoi.h` / `vehicle/simvehicle.h`
+
+- 役割: 「全区間在線」の到着予測（`il_query.cc` の `panel_ticks_until_arrival()`）が、本体の非公開の値を読むため。
+  計算そのものは `interlocking/` にあり、本体は値を返す1行だけ。`#ifdef` は付けていない（読むだけで害がないため）。
+- `simconvoi.h`: `is_in_delay_recovery()` の後に
+  `uint8 get_speed_magnification() const { return speed_magnification; } // TID_IL H9: arrival forecast of the interlocking panel`
+- `vehicle/simvehicle.h`: `vehicle_base_t` の `get_steps_next()`（本家にもともとある）の行末に `// TID_IL H9` の目印を付けただけ。
+  本家がこの関数を消したら、同じ1行を足す。
+
 ### H2 ステップ処理 — `simworld.cc`
 
 - 役割: 列車が通過した進路を自動で解除する（全クライアントで同じ順に実行される場所であること）。
@@ -154,6 +163,14 @@ v60 で関数が分割・改名されていたら、「役割」に合う場所�
 - `Simutrans-Main.vcxitems`: `simworld.cc` の `ClCompile` の後に同じ 5 ファイル。
 
 ## 移植の記録
+
+### プルリクエスト nain76/TID_simutrans#1 の取り込み（2026-10）
+
+- 全区間在線・OuDiaSecond 連携・遅延推定・駅名エイリアス・中継点付き進路・登録進路の優先を取り込んだ。
+- 本体の改造を減らした: PR では到着予測の計算（約60行）が `simconvoi.cc` に入っていたのを `interlocking/il_query.cc` へ移し、
+  本体は取得関数（H9）だけにした。移す前後の値が同じことを走行中の列車で確かめた。
+- 機能の重なり: PR の「中継点」とこちらの「経由ボタン」は同じ機能なので 1 つ（経由）にまとめた。
+- セーブ形式: PR のエイリアス・ダイヤは version 17・18 だったが、こちらの 17（カスタム盤の送信途中）と重なるため 18・19 に付け替えた。
 
 ### v62.4.1 → v62.4.2（2026-10）
 

@@ -7,7 +7,7 @@ run(`
 const N=1,E=2,S=4,W=8,DIRS=[1,2,4,8],BACK={1:4,2:8,4:1,8:2},DXY={1:[0,-1],2:[1,0],4:[0,1],8:[-1,0]};
 const key=p=>p.join(',');
 let st={id:1,manual:true,levers:[],departures:[]},status={routes:[]},stationId=1,tab='run',manualRoute=null;
-let tileIndex=new Map(),stationTiles=new Set(),tracks={tiles:[]};
+let tileIndex=new Map(),stationTiles=new Set(),tracks={tiles:[]},shownAhead=new Map();
 let layout={points:[],exits:[],groups:[],sidings:[],groupOf:new Map(),sidingOf:new Map()};
 const station=()=>st, isRelay=()=>false, render=()=>{}, toast=()=>{}, signalLabel=()=> '信号', shuntColor=()=> 'P', refuseOther=()=>false;
 const platformName=()=> 'ホーム',sidingName=()=> '留置線',exitName=()=> '出口';
@@ -67,7 +67,9 @@ assert.match(run("sent.at(-1)"),/1:2:0;2:2:0;3:2:0.*1L$/);
 run("nxStart={pos:[0,1,0]};tileIndex.get('2,2,0').c=9;");
 assert.equal(run("findDestinations(nxStart).get('p0').free"),false,'occupied registered branch must not fall back to the free direct branch');
 run("delete tileIndex.get('2,2,0').c;routeVia=[[2,1,0]];");
-assert.equal(run("findDestinations(nxStart).has('p0')"),false,'temporary waypoints cannot silently replace a registered branch');
+// chosen vias take precedence over the registered route (the route is not labelled with the registered name)
+assert.ok(path("findDestinations(nxStart).get('p0').path").includes('2,1,0'),'chosen vias take precedence over a registered branch');
+assert.equal(run("findDestinations(nxStart).get('p0').registeredName"),undefined,'a route through chosen vias is not the registered one');
 run(`routeVia=[];layout.points=[{t:tileIndex.get('1,1,0'),normal:[[W,E]],reverse:[[W,S]]}];st.levers=[{pos:[1,1,0],value:'N'}];`);
 assert.equal(run("findDestinations(nxStart).has('p0')"),false,'points set against a registered branch must not cause a fallback');
 run("layout.points=[];st.levers=[];status.routes[0].temp=true;");

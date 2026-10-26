@@ -13,7 +13,7 @@ for (const line of [[[0,1],[1,1],[2,1],[3,1],[4,1],[5,1]],[[1,1],[1,2],[2,2],[3,
 }
 tiles.get('0,1,0').m=2;tiles.get('0,1,0').s={aspect:'red',name:'場内信号',o:0};
 tiles.get('4,1,0').h=1;tiles.get('5,1,0').h=1;
-const station={id:1,name:'中継点テスト',owner:0,manual:true,kind:'electronic',view:[0,0,6,3,1],signals:[{pos:[0,1,0],aspect:'red'}],departures:[]};
+const station={id:1,name:'経由テスト',owner:0,manual:true,kind:'electronic',view:[0,0,6,3,1],signals:[{pos:[0,1,0],aspect:'red'}],departures:[]};
 const api={status:{stations:[station],routes:[],station_aliases:[],operations:{id:'-',bytes:0,diagram:-1}},
  info:{map:[64,64],player:0,players:[{nr:0,name:'鉄道'}]},halts:{halts:[{id:1,name:station.name,owner:0,tiles:[[4,1,0],[5,1,0]]}]},
  tracks:{tiles:[...tiles.values()],convoys:{}},events:{last:0,events:[]},panel:{rev:1,parts:[]}};
@@ -62,14 +62,14 @@ try {
  await page.reload();
  // Register a permanent route using the same ordered checkpoint.
  await page.locator('[data-tab="setup"]').click();
- assert.match(await page.locator('#routeHint').innerText(),/中継点を指定/);
+ assert.match(await page.locator('#routeHint').innerText(),/経由を指定/);
  await page.locator('#btnManualRoute').click();
  assert.equal(await page.locator('#manualRouteViaControls #routeViaBar').isVisible(),true);
  assert.equal(await page.locator('#routeViaPick').isDisabled(),true);
  assert.match(await page.locator('#routeHint').innerText(),/手順1/);
  await page.locator('#map g.clickable').filter({has:page.locator('title').getByText('場内信号',{exact:false})}).click();
  await page.locator('#routeViaPick').click();
- assert.match(await page.locator('#routeHint').innerText(),/手順2: 中継点を通過順/);
+ assert.match(await page.locator('#routeHint').innerText(),/手順2: 経由する線路を通過順/);
  await page.locator('[data-route-point="1,1,0"]').click();
  assert.equal(await page.locator('#map .route-waypoint').count(),1);
  await page.locator('[data-route-tile="2,2,0"]').click();
@@ -77,7 +77,7 @@ try {
  if(process.env.ROUTE_VIA_SCREENSHOT) await page.screenshot({path:process.env.ROUTE_VIA_SCREENSHOT});
  await page.locator('#routeViaPick').click();
  assert.match(await page.locator('#routeHint').innerText(),/手順3/);
- page.once('dialog',d=>d.accept('中継点経由'));
+ page.once('dialog',d=>d.accept('経由あり'));
  await page.locator('[data-route-tile="5,1,0"]').click();
  await page.waitForFunction(()=>!manualRoute);
  await page.waitForFunction(()=>pending.size===0);
@@ -117,7 +117,7 @@ try {
  const customLine=page.locator('[data-route-part="0"]'), cb=await customLine.boundingBox();
  await page.mouse.click(cb.x+cb.width/2,cb.y+cb.height/2);
  await page.locator('#routeViaPick').click();
- page.once('dialog',d=>d.accept('カスタム盤の中継点経由'));
+ page.once('dialog',d=>d.accept('カスタム盤の経由あり'));
  await page.locator('#map [data-part="2"]').click();
  await page.waitForFunction(()=>!manualRoute&&pending.size===0);
  assert.equal(commands.filter(c=>c.startsWith('rt_path,')).length,2);
