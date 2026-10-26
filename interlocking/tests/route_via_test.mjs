@@ -75,5 +75,10 @@ assert.equal(run("findDestinations(nxStart).has('p0')"),false,'points set agains
 run("layout.points=[];st.levers=[];status.routes[0].temp=true;");
 assert.ok(!path("findDestinations(nxStart).get('p0').path").includes('2,2,0'),'temporary routes are not stored definitions');
 run("status.routes=[];");
+// a via point further in on the platform than where the route enters it (the platform is 4,1 and 5,1)
+run(`status.routes=[];routeVia=[];layout.groups=[[tileIndex.get('4,1,0'),tileIndex.get('5,1,0')]];layout.groupOf=new Map([['4,1,0',0],['5,1,0',0]]);nxStart={pos:[0,1,0]};`);
+assert.ok(path("findDestinations(nxStart,[[5,1,0]]).get('p0').path").includes("5,1,0"), "a via point inside the platform leads to that platform");
+assert.ok(path("findDestinations(nxStart,[[2,2,0],[5,1,0]]).get('p0').path").includes("2,2,0"), "a loop via point and then one inside the platform");
+run(`layout.groups=[[tileIndex.get('5,1,0')]];layout.groupOf=new Map([['5,1,0',0]]);`);
 console.log("PASS: ordered route waypoints for main/departure/shunting/calling-on, occupied paths, manual routes, loops and reset");
 console.log("PASS: registered route selection, stored name, occupancy and point restrictions without alternative branch fallback");

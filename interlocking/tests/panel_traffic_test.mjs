@@ -155,4 +155,16 @@ if (process.argv[2]) {
 	if (/^Operation\d+B=(?:3|4)\//m.test(context.source)) assert.ok(result.some(d => d.entries > 0), "legacy sample must reconstruct actual assignments");
 	console.log("Real OuDiaSecond file:", result);
 }
+// incomplete work strings (no "/") must not throw a TypeError
+for (const work of ["0", "1", "2", "3", "4", "5", "6", "0,5", "3,0", "4,1,0"]) {
+	context.source = file(`EkiJikoku=1;1000,1;1010/1011,1;1020/\nOperation0B=${work}\nOperation1A=${work}\nOperation2A=${work}`);
+	run("parseOudOperations(source)");
+}
+// a train whose stop times keep falling: the midnight correction is one step per stop (was quadratic)
+{
+	const times = Array.from({ length: 20000 }, (_, i) => `1;${String(2359 - (i % 1400)).padStart(4, "0")}`).join(",");
+	context.source = file(`EkiJikoku=${times}\nOperationNumber0=A01`);
+	const t0 = Date.now(); run("parseOudOperations(source)");
+	assert.ok(Date.now() - t0 < 3000, `20,000 falling stop times parsed in ${Date.now() - t0} ms`);
+}
 console.log("PASS: modern and legacy operations, turnarounds, platforms, shunts, coupling/splitting, renumbering, link codes, midnight, conflicts and thresholds");

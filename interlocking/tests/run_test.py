@@ -139,6 +139,12 @@ def run(args):
         check(not p.cmd("alias_set,%00,bad")["ok"], "invalid NUL alias rejected")
         check(p.cmd("alias_set,Other,Old")["ok"] and p.cmd("alias_set,Other,New")["ok"], "overwrite one shared alias")
         check(p.cmd("alias_del,Other")["ok"], "delete one shared alias")
+        check(not p.cmd("alias_set,%FF%FE,bad")["ok"] and not p.cmd("alias_set,%C0%AF,bad")["ok"], "an alias that is not UTF-8 is rejected")
+        # a part of a diagram upload: its result event carries only "oud_part,token,offset", not the data
+        tok = "0123456789abcdef0123456789abcdef"
+        p.send("cmd oud_part," + tok + ",0," + "41" * 1600)
+        ev = p.wait_event(lambda e: e["type"] == "result" and e["command"].startswith("oud_part,"))
+        check(ev["command"] == "oud_part," + tok + ",0", f"oud_part result without the data ({len(ev['command'])} characters)")
         r = p.cmd("st_new,A station, east")
         check(r["ok"], "create station")
         st0 = p.status()["stations"][0]

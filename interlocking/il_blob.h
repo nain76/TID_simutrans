@@ -166,7 +166,14 @@ inline void il_blob_t::begin_section()
 	if(  loading  ) {
 		uint32 len = 0;
 		rdwr_long(len);
-		sections.append(pos + len);
+		if(  pos > data.get_count()  ||  len > data.get_count() - pos  ) {
+			// the section is longer than the data (also when pos + len would wrap round): the data is damaged
+			broken = true;
+			sections.append(data.get_count());
+		}
+		else {
+			sections.append(pos + len);
+		}
 	}
 	else {
 		sections.append(data.get_count());
@@ -188,7 +195,7 @@ inline void il_blob_t::end_section()
 		if(  mark > data.get_count()  ||  pos > mark  ) {
 			// the section is longer than the data, or more was read than it holds: the data is damaged
 			broken = true;
-			pos = min(mark, data.get_count());
+			pos = mark < data.get_count() ? mark : data.get_count(); // not min(): that is the int one
 		}
 		else {
 			pos = mark;

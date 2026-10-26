@@ -917,7 +917,18 @@ static bool decode_alias_name(const char *input, plainstring &name)
 		if(  c < 32 || c == 127 || n >= sizeof(out) - 1  ) return false;
 		out[n++] = (char)c;
 	}
-	out[n] = 0; name = out; return n != 0;
+	out[n] = 0;
+	// valid UTF-8 only (it goes into the JSON of the status)
+	for(  size_t i = 0; i < n;  ) {
+		const unsigned char c = (unsigned char)out[i];
+		size_t len = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 0;
+		if(  len == 0  ||  i + len > n  ||  (len == 2  &&  c < 0xC2)  ||  (len == 4  &&  c > 0xF4)  ) return false;
+		for(  size_t k = 1; k < len; k++  ) if(  ((unsigned char)out[i + k] & 0xC0) != 0x80  ) return false;
+		const unsigned char c1 = (unsigned char)out[i + 1];
+		if(  (len == 3  &&  ((c == 0xE0  &&  c1 < 0xA0)  ||  (c == 0xED  &&  c1 >= 0xA0)))  ||  (len == 4  &&  ((c == 0xF0  &&  c1 < 0x90)  ||  (c == 0xF4  &&  c1 >= 0x90)))  ) return false;
+		i += len;
+	}
+	name = out; return n != 0;
 }
 
 const char *interlocking_manager_t::execute(const char *param, player_t *player)
@@ -1802,7 +1813,18 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 
 	cbuffer_t ev;
 	ev.append("{\"type\":\"result\",\"command\":");
-	append_json_string(ev, param);
+	if(  strncmp(param, "oud_part,", 9) == 0  ) {
+		// a part of a diagram upload (up to 3.2 KB of data): every panel would get the whole file again; keep "oud_part,token,offset"
+		const char *p = param + 9;
+		for(  int commas = 0; *p  &&  (*p != ','  ||  ++commas < 2); p++  ) {}
+		char head[128];
+		const size_t len = (size_t)(p - param) < sizeof(head) - 1 ? (size_t)(p - param) : sizeof(head) - 1;
+		memcpy(head, param, len); head[len] = 0;
+		append_json_string(ev, head);
+	}
+	else {
+		append_json_string(ev, param);
+	}
 	ev.printf(",\"ok\":%s", error ? "false" : "true");
 	if(  error  ) {
 		ev.append(",\"error\":");

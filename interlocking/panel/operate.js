@@ -352,7 +352,6 @@ function findDestinations(start, via = routeVia) {
 				const group = id[0] === "p" ? layout.groups[Number(id.slice(1))] : id[0] === "s" ? layout.sidings[Number(id.slice(1))].tiles : null;
 				if (group) path = extend(path, directions.at(-1), null, group);
 				const record = (target, tiles) => {
-					if (routeViaProgress(tiles, via) !== via.length) return;
 					const free = !tiles.slice(1).some(t => blocked.has(key(t.p)));
 					if (!res.has(target) || (free && !res.get(target).free)) res.set(target, { label: label + (target === id ? "" : "手前"), path: tiles, free, registeredName: r.name });
 				};

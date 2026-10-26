@@ -59,7 +59,7 @@ function parseOudOperations(text) {
 				const stops = (v.EkiJikoku || "").split(",").map((s, i) => {
 					const times = (s.split(";")[1] || "").split("$")[0].split("/").map(oudTime);
 					for (let j = 0; j < times.length; j++) if (times[j] !== null) {
-						while (previous !== null && times[j] < previous) times[j] += 86400;
+						if (previous !== null && times[j] < previous) times[j] += 86400 * Math.ceil((previous - times[j]) / 86400);
 						previous = times[j];
 					}
 					const hasSlash = (s.split(";")[1] || "").split("$")[0].includes("/");
@@ -137,7 +137,7 @@ function restoreLegacyOperations(records, stations, settings, add) {
 		if (work == null || work === "") work = "5/$";
 		const operations = work.split(",").map(s => { const a = s.split("/"); return { type: Number(a[0]), a }; });
 		const beforeTrack = index => {
-			for (let j = index; j < operations.length; j++) if (operations[j].type === 0) return Number(operations[j].a[1].split("$")[0]);
+			for (let j = index; j < operations.length; j++) if (operations[j].type === 0) return Number((operations[j].a[1] || "").split("$")[0]);
 			return platform;
 		};
 		let track = before ? beforeTrack(0) : platform, current = input || constant([]), time = fallback;
@@ -337,6 +337,8 @@ let networkMapZoom = 1;
 let networkMapRendered = null;
 const operationConfig = { early: 120, late: 1800, diagram: -1, stationAliases: [] };
 try { Object.assign(operationConfig, JSON.parse(localStore("operationConfig") || "{}")); } catch (e) {}
+// a stored setting that is not a whole number of seconds (an old or damaged entry) goes back to the default
+for (const [field, value] of [["early", 120], ["late", 1800]]) if (!Number.isInteger(operationConfig[field]) || operationConfig[field] < 0 || operationConfig[field] > 86399) operationConfig[field] = value;
 operationConfig.stationAliases = [];
 operationConfig.diagram = -1;
 let sharedAliasesReady = false, aliasDraftDirty = false, aliasSaving = false, aliasDraftBase = [];
@@ -609,6 +611,7 @@ document.getElementById("operationFile").addEventListener("change", async e => {
 		let text;
 		try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
 		catch (e) { text = new TextDecoder("shift-jis").decode(bytes); }
+		text = text.replace(/\0/g, ""); // the game does not take NUL bytes
 		const diagrams = parseOudOperations(text);
 		if (!diagrams.some(d => d.entries.length)) throw new Error("運用番号を読み取れません。OuDiaSecondの出区・路線外始発・運用番号変更の作業設定、または保存された運用情報を確認してください");
 		const source = new TextEncoder().encode(text);
@@ -624,6 +627,8 @@ document.getElementById("operationFile").addEventListener("change", async e => {
 		}
 		const result = await commandResult(`oud_commit,${token}`);
 		if (!result.ok) throw new Error(tr(result.error));
+		// the game now holds this text: no need to fetch it back
+		operationData = { id: token, file: file.name, diagrams };
 		await refreshStatus();
 	} catch (err) { toast("運用情報を読み込めません: " + err.message); }
 	finally { e.target.value = ""; setOperationsBusy(false); renderOperationSettings(); }

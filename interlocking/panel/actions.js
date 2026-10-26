@@ -71,7 +71,8 @@ async function tileClicked(t) {
 	const path = routeVia.length ? manualPathVia(start, t.p) : null;
 	if (routeVia.length && !path) { toast("指定した経由を順に通る進路がありません"); return; }
 	const name = prompt("進路の名前", `${signalLabel(st, start)}→(${t.p[0]},${t.p[1]})`);
-	const cmd = path ? routePathCommand("rt_path", st, path, name || "") : `rt_def,${st.id},${start.join(",")},${t.p.join(",")},${name}`;
+	// cancelled: nothing to check (no "too long" message)
+	const cmd = !name ? null : path ? routePathCommand("rt_path", st, path, name) : `rt_def,${st.id},${start.join(",")},${t.p.join(",")},${name}`;
 	if (name && !cmd) return;
 	manualRoute = null;
 	render();

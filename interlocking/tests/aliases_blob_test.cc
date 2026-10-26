@@ -45,5 +45,13 @@ int main()
 	il_blob_t corrupt(true); copy_bytes(corrupt.data, oversized.data);
 	il_rdwr_station_aliases(corrupt, restored_names, restored_values);
 	assert(corrupt.broken);
-	std::puts("PASS: shared alias save/load, UTF-8, empty-map reset and damaged data");
+	// A section length of 2^31 or more (or one that wraps round) never moves the position past the data.
+	for(  uint32 len : {0xF8000010u, 0xFFFFFFFCu, 0x80000000u, 100u}  ) {
+		il_blob_t huge(true);
+		for(  int i = 0; i < 4; i++  ) huge.data.append((uint8)((len >> (8 * i)) & 0xFF));
+		for(  int i = 0; i < 12; i++  ) huge.data.append(0);
+		huge.begin_section(); uint8 b; huge.rdwr_byte(b); huge.end_section();
+		assert(huge.broken && huge.pos <= huge.data.get_count());
+	}
+	std::puts("PASS: shared alias save/load, UTF-8, empty-map reset damaged data and huge section lengths");
 }

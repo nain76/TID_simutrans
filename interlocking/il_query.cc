@@ -134,7 +134,7 @@ static bool panel_ticks_until_arrival(const convoi_t *cnv, uint32 &ticks)
 	sint32 train_limit = cnv->get_min_top_speed();
 	sint64 power = 0;
 	convoihandle_t c = cnv->self;
-	while(  c.is_bound()  ) {
+	for(  int coupled = 0; c.is_bound()  &&  coupled < 64; coupled++  ) { // the limit only guards against a loop in the chain
 		power += c->get_sum_gear_and_power();
 		if(  c->get_schedule()  &&  c->get_schedule()->get_max_speed()  ) {
 			train_limit = min(train_limit, kmh_to_speed(c->get_schedule()->get_max_speed()));
