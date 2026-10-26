@@ -186,6 +186,17 @@ static void remove_side(il_station_t *st, koord3d pos)
 }
 
 
+static void remove_dir(il_station_t *st, koord3d pos)
+{
+	for(  uint32 i = st->dir_pos.get_count();  i-- > 0;  ) {
+		if(  st->dir_pos[i] == pos  ) {
+			st->dir_pos.remove_at(i);
+			st->dir_val.remove_at(i);
+		}
+	}
+}
+
+
 static void remove_pairs(il_station_t *st, koord3d pos)
 {
 	sint32 i;
@@ -1122,7 +1133,33 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 			else {
 				remove_pairs(st, pos);
 				remove_side(st, pos);
+				remove_dir(st, pos);
 				remove_shunt_lever(st, pos);
+			}
+		}
+	}
+	else if(  strcmp(cmd, "sig_dir") == 0  &&  n >= 6  ) {
+		// a signal for both directions: the directions in which the panel leads trains away from it (0 = not known)
+		il_station_t *st = find_station((uint16)atoi(f[1]));
+		const koord3d pos((sint16)atoi(f[2]), (sint16)atoi(f[3]), (sint8)atoi(f[4]));
+		const int mask = atoi(f[5]);
+		if(  st == NULL  ) {
+			error = "unknown station";
+		}
+		else if(  !may_operate(st, player)  ) {
+			error = "not owner";
+		}
+		else if(  !st->signals.is_contained(pos)  ) {
+			error = "signal not registered";
+		}
+		else if(  mask < 0  ||  mask > 15  ) {
+			error = "bad setting";
+		}
+		else {
+			remove_dir(st, pos);
+			if(  mask  ) {
+				st->dir_pos.append(pos);
+				st->dir_val.append((uint8)mask);
 			}
 		}
 	}
@@ -2187,8 +2224,8 @@ const char *interlocking_manager_t::parse_parts(const char *s, vector_tpl<il_par
 /// all settings of a start point move to another tile (the platform end moved), or go (to = invalid)
 static void move_start_point(il_station_t *st, koord3d from, koord3d to)
 {
-	vector_tpl<koord3d> *lists[] = { &st->pair_left, &st->pair_right, &st->side_pos, &st->shunt_pos, &st->area_pos };
-	for(  uint32 k = 0;  k < 5;  k++  ) {
+	vector_tpl<koord3d> *lists[] = { &st->pair_left, &st->pair_right, &st->side_pos, &st->shunt_pos, &st->area_pos, &st->dir_pos };
+	for(  uint32 k = 0;  k < 6;  k++  ) {
 		FOR(vector_tpl<koord3d>, &p, *lists[k]) {
 			if(  p == from  ) {
 				p = to;
@@ -2198,6 +2235,7 @@ static void move_start_point(il_station_t *st, koord3d from, koord3d to)
 	if(  to == koord3d::invalid  ) {
 		remove_pairs(st, koord3d::invalid);
 		remove_side(st, koord3d::invalid);
+		remove_dir(st, koord3d::invalid);
 		remove_shunt_lever(st, koord3d::invalid);
 		for(  uint32 i = st->area_pos.get_count();  i-- > 0;  ) {
 			if(  st->area_pos[i] == koord3d::invalid  ) {
@@ -2220,6 +2258,10 @@ void interlocking_manager_t::rescan_station(il_station_t *st)
 	cbuffer_t ev;
 	ev.printf("{\"type\":\"rescan\",\"station\":%u", st->id);
 	uint32 sig_gone = 0, dep_gone = 0, dep_moved = 0, lever_gone = 0, siding_gone = 0, busy = 0;
+
+	// the directions of signals for both directions follow the track as it is now: the panel works them out again
+	st->dir_pos.clear();
+	st->dir_val.clear();
 
 	// 1. signals that were removed in the game
 	for(  uint32 i = st->signals.get_count();  i-- > 0;  ) {
@@ -2564,22 +2606,40 @@ bool interlocking_manager_t::on_signal(rail_vehicle_t *v, uint16 next_block, sin
 		return false;
 	}
 
-	// a signal for both directions is asked for trains of either direction: the routes of the panel lead
-	// away from the signal in one direction only (their second tile); a train coming from that side
-	// passes the signal the other way, which is not the business of the panel
-	const koord3d prev = next_block > 0 ? cnv->get_route()->at(next_block - 1) : koord3d::invalid;
-	if(  prev != koord3d::invalid  ) {
-		FOR(vector_tpl<il_route_t *>, rr, routes) {
-			if(  rr->tiles[0] == spos  &&  rr->tiles.get_count() >= 2  &&  rr->tiles[1] == prev  ) {
-				return false;
+	// a signal for both directions is asked for trains of either direction. The panel handles the directions
+	// in which it leads trains away from the signal: those the panel worked out (where destinations lie) and
+	// those of the routes from the signal. A train going another way passes the signal as the core sees fit;
+	// while no direction is known at all, the train waits (as at any signal without a route).
+	const route_t *croute = cnv->get_route();
+	const koord3d prev = next_block > 0 ? croute->at(next_block - 1) : koord3d::invalid;
+	const koord3d next = next_block + 1u < croute->get_count() ? croute->at(next_block + 1) : koord3d::invalid;
+	const ribi_t::ribi travel = prev != koord3d::invalid ? ribi_type(prev, spos) : next != koord3d::invalid ? ribi_type(spos, next) : (ribi_t::ribi)ribi_t::none;
+	const bool single_travel = ribi_t::is_single(travel);
+	if(  single_travel  ) {
+		uint8 handled = 0;
+		for(  uint32 j = 0;  j < st->dir_pos.get_count();  j++  ) {
+			if(  st->dir_pos[j] == spos  ) {
+				handled |= st->dir_val[j];
 			}
+		}
+		FOR(vector_tpl<il_route_t *>, rr, routes) {
+			if(  rr->tiles[0] == spos  &&  rr->tiles.get_count() >= 2  ) {
+				handled |= ribi_type(spos, rr->tiles[1]);
+			}
+		}
+		if(  handled  &&  !(handled & travel)  ) {
+			return false;
 		}
 	}
 
-	// find the route that is set from this signal (or already admitted this train)
+	// find the route that is set from this signal (or already admitted this train), in the direction of the train
 	il_route_t *r = NULL;
 	FOR(vector_tpl<il_route_t *>, rr, routes) {
 		if(  rr->tiles[0] != spos  ) {
+			continue;
+		}
+		if(  single_travel  &&  rr->tiles.get_count() >= 2  &&  ribi_type(spos, rr->tiles[1]) != travel  ) {
+			// a route the other way (for a train coming from the other side)
 			continue;
 		}
 		if(  rr->state == IL_SET  ||  (rr->state == IL_OCCUPIED  &&  rr->convoy == cnv->self)  ) {
@@ -3029,7 +3089,8 @@ void interlocking_manager_t::rdwr(loadsave_t *file)
 
 // format of the data block (independent of IL_SAVE_VERSION, which belongs to the old format)
 // 17: custom panel being uploaded, 18: station name aliases, 19: OuDiaSecond diagram
-#define IL_BLOCK_VERSION 19
+// 20: directions of signals for both directions
+#define IL_BLOCK_VERSION 20
 // far more than any station needs (a few hundred kilobytes for a large game; a diagram up to 8 MB)
 #define IL_MAX_BLOCK (64u * 1024u * 1024u)
 
@@ -3262,6 +3323,14 @@ void interlocking_manager_t::rdwr_blob(il_blob_t &b)
 				}
 			}
 		}
+		if(  version >= 20  ) {
+			b.rdwr_pos_vector(st->dir_pos);
+			b.rdwr_byte_vector(st->dir_val);
+			if(  b.loading  &&  st->dir_pos.get_count() != st->dir_val.get_count()  ) {
+				st->dir_pos.clear();
+				st->dir_val.clear();
+			}
+		}
 		future_fields(b);
 		b.end_section();
 		if(  b.loading  ) {
@@ -3356,6 +3425,10 @@ void interlocking_manager_t::rotate90(sint16 y_size)
 		}
 		for(  uint32 i = 0;  i < st->side_pos.get_count();  i++  ) {
 			st->side_pos[i].rotate90(y_size);
+		}
+		for(  uint32 i = 0;  i < st->dir_pos.get_count();  i++  ) {
+			st->dir_pos[i].rotate90(y_size);
+			st->dir_val[i] = ribi_t::rotate90((ribi_t::ribi)st->dir_val[i]);
 		}
 		for(  uint32 i = 0;  i < st->shunt_pos.get_count();  i++  ) {
 			st->shunt_pos[i].rotate90(y_size);
@@ -3563,6 +3636,11 @@ void interlocking_manager_t::get_status_json(cbuffer_t &buf) const
 			buf.append("{\"pos\":");
 			append_json_pos(buf, pos);
 			buf.printf(",\"aspect\":\"%s\"", sig == NULL ? "missing" : sig->get_state() == roadsign_t::STATE_GREEN ? "green" : sig->get_state() == roadsign_t::STATE_YELLOW ? "yellow" : "red");
+			for(  uint32 j = 0;  j < st->dir_pos.get_count();  j++  ) {
+				if(  st->dir_pos[j] == pos  ) {
+					buf.printf(",\"hd\":%u", st->dir_val[j]);
+				}
+			}
 			// approach indication: the train that holds the signal tile (waiting at or approaching the signal)
 			const schiene_t *sch = get_rail(pos);
 			const convoihandle_t holder = sch ? sch->get_reserved_convoi() : convoihandle_t();

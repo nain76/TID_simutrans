@@ -7,6 +7,8 @@ passes S1 westbound (from A1 back west) is not the business of these routes:
   1. no route set: the westbound train is not held at S1 for ever
   2. the route S1 -> A1 set for another train: the westbound train is not let into it (which would
      turn it back east into the station); the route stays set
+  3. routes from S1 both ways: a train of either direction waits for a route of its own direction
+  4. the directions told by the panel (sig_dir): with west handled the westbound train waits even with no route
 
 Usage: two_way_test.py --sim build/default/sim --workdir <dir>
 """
@@ -74,6 +76,46 @@ def run(args):
         wait_until(west, 90, "train west of S1 again")
         check(seen == {"set"}, f"the route stayed set, the westbound train never took it ({sorted(seen)})")
         check(p.cmd(f"cancel,{rid2}")["ok"], "cancelled")
+
+        def stays(cond, secs):
+            end = time.time() + secs
+            while time.time() < end:
+                if not cond(cnv()):
+                    return False
+                time.sleep(0.3)
+            return True
+
+        print("[3] routes from S1 both ways: each direction waits for its own route")
+        west = ";".join(f"{x}:5:0" for x in (3, 2))
+        check(p.cmd(f"rt_path,{sid},{west},west")["ok"], "route S1 -> (2,5) (westbound) as well")
+        rid3 = next(r for r in p.status()["routes"] if r["name"] == "west")["id"]
+        # the train now comes back east from (2,5): with no eastbound route set it waits at S1
+        check(stays(lambda c: c["pos"][0] <= 3, 12), "eastbound train waits at S1 (the westbound route does not let it pass)")
+        check(p.cmd(f"set,{rid}")["ok"], "eastbound route set")
+        wait_until(lambda: cnv()["pos"][0] >= 6, 90, "train at A1 again")
+        wait_until(lambda: next(r for r in p.status()["routes"] if r["id"] == rid)["state"] == "idle", 60, "route released")
+        time.sleep(3)
+        check(stays(lambda c: c["pos"][0] >= 4, 15), "westbound train waits at S1 for the westbound route")
+        check(p.cmd(f"set,{rid3}")["ok"], "westbound route set")
+        wait_until(lambda: cnv()["pos"][0] <= 2, 90, "train west of S1 by the westbound route")
+        check(True, "the westbound train took its own route")
+        wait_until(lambda: next(r for r in p.status()["routes"] if r["id"] == rid3)["state"] == "idle", 60, "westbound route released")
+        check(p.cmd(f"rt_del,{rid3}")["ok"], "westbound route deleted again")
+
+        print("[4] directions told by the panel (sig_dir), no westbound route")
+        check(p.cmd(f"sig_dir,{sid},3,5,0,10")["ok"], "S1 handles east and west")
+        check(next(s for s in p.status()["stations"][0]["signals"] if s["pos"] == [3, 5, 0]).get("hd") == 10, "the status shows it")
+        check(p.cmd(f"set,{rid}")["ok"], "eastbound route set")
+        wait_until(lambda: cnv()["pos"][0] >= 6, 90, "train at A1 again")
+        wait_until(lambda: next(r for r in p.status()["routes"] if r["id"] == rid)["state"] == "idle", 60, "route released")
+        time.sleep(3)
+        check(stays(lambda c: c["pos"][0] >= 4, 15), "westbound train waits at S1 (west is handled, no route)")
+        check(p.cmd(f"sig_dir,{sid},3,5,0,2")["ok"], "S1 handles east only")
+        wait_until(lambda: cnv()["pos"][0] <= 2, 90, "train west of S1")
+        check(True, "the westbound train passes once west is not handled")
+        check(not p.cmd(f"sig_dir,{sid},3,5,0,16")["ok"] and not p.cmd(f"sig_dir,{sid},9,9,0,2")["ok"], "bad direction / unregistered signal rejected")
+        hd = lambda: next(s for s in p.status()["stations"][0]["signals"] if s["pos"] == [3, 5, 0]).get("hd")
+        check(p.cmd(f"st_rescan,{sid}")["ok"] and hd() is None, "re-reading the track forgets the directions (the panel works them out again)")
     finally:
         game.terminate()
         try:

@@ -219,6 +219,24 @@ function setLever(li, pos) {
  * track in the direction of travel and the manually set points. free = no train and no
  * other route on it.
  */
+// a signal for both directions: the game asks the panel for trains of either direction. Tell it in which
+// directions the panel leads trains away from the signal (where destinations lie), so that a train going the
+// other way passes, and one going a handled way waits for its route even before any route was ever set.
+// Once per signal and track layout, by a browser that may operate the station (the game keeps it).
+const signalDirsChecked = new Map();   // "station|pos" -> tracksSig when worked out
+function syncSignalDirections(st, mayOperate) {
+	if (!st || !mayOperate || !tracks.tiles.length || !stationTiles || layout.station !== st.id) return;
+	for (const s of st.signals) {
+		if (s.hd) continue;
+		const t = tileIndex.get(key(s.pos)), tag = st.id + "|" + key(s.pos);
+		if (!t || !t.s || !((t.s.dir & 5) === 5 || (t.s.dir & 10) === 10) || signalDirsChecked.get(tag) === tracksSig) continue;
+		signalDirsChecked.set(tag, tracksSig);
+		let mask = 0;
+		for (const d of findDestinations({ pos: s.pos }, []).values()) mask |= DIRS.find(x => neighbour(t, x) === d.path[1]) || 0;
+		if (mask) command(`sig_dir,${st.id},${s.pos.join(",")},${mask}`, `両方向信号の向き（${signalLabel(st, s.pos)}）`);
+	}
+}
+
 function findDestinations(start, via = routeVia) {
 	const vias = via.map(key);
 	const st = station();

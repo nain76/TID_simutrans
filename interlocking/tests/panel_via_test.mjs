@@ -1,8 +1,11 @@
 // Web panel: via buttons (経由) on the il-via scenario: from S1 to the platform P straight along the main
 // track, or round the loop when the loop is chosen as a via point. Electronic and relay panel.
+// Then S1 is made a signal for both directions: the panel tells the game the direction it handles.
 //
 //   node interlocking/tests/panel_via_test.mjs <sim binary> <workdir> <screenshot dir>
 import { spawn } from "node:child_process";
+import net from "node:net";
+import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -110,6 +113,28 @@ try {
 	await waitFor(async () => !!(await routeTiles()), 10000, "custom route set");
 	const cr = await routeTiles();
 	check(cr.includes("7,7,0") && !cr.includes("7,5,0"), `custom panel: the route goes round the loop (${cr.join(" ")})`);
+
+	console.log("[6] S1 made a signal for both directions: the panel tells the game which way it leads trains");
+	const text = fs.readFileSync("simmenu.h", "utf8"), block = text.slice(text.indexOf("TOOL_QUERY=0"), text.indexOf("GENERAL_TOOL_COUNT"));
+	const tools = [...("\t" + block).matchAll(/^\s*(\w+)\s*(?:=\s*0)?\s*,/gm)].map(m => m[1]);
+	const line = (l) => new Promise(res => { const s = net.connect(PORT, "127.0.0.1", () => { s.write(l + "\n"); setTimeout(() => { s.destroy(); res(); }, 600); }); });
+	let sent = 0;
+	page.on("request", r => { if (r.url().endsWith("/api/cmd") && (r.postData() || "").startsWith("sig_dir,")) sent++; });
+	const sname = await page.evaluate(() => tileIndex.get("3,5,0").s.name);
+	for (let i = 0; i < 4 && await page.evaluate(() => tileIndex.get("3,5,0").s.dir) !== 10; i++) {
+		// building the same signal again on its tile turns it; one of the turns is "both directions"
+		await line(`debug_work ${tools.indexOf("TOOL_BUILD_ROADSIGN")} 3,5,0 ${sname}`);
+		await page.evaluate(() => refreshTracks().then(render)); await sleep(1500);
+	}
+	const hd = async () => (await st()).stations[0].signals.find(x => x.pos.join(",") === "3,5,0").hd;
+	await waitFor(async () => (await hd()) !== undefined, 8000, "direction sent");
+	check(await hd() === 2, `S1 leads trains east only (no destinations to the west): hd ${await hd()}`);
+	await sleep(3000);
+	const before = sent;
+	check(before === 1, `sent once, not on every redraw (${before})`);
+	await cmd(`st_rescan,${sid}`);
+	await waitFor(async () => sent > before && (await hd()) === 2, 10000, "direction sent again after re-reading the track");
+	check(true, "after re-reading the track the panel works the direction out again");
 	await browser.close();
 } catch (e) { console.log("ERROR", e); failed = true; } finally { game.kill(); }
 console.log(failed ? "TEST FAILED" : "ALL VIA PANEL TESTS PASSED");

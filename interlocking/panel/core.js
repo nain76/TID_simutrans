@@ -243,6 +243,8 @@ function handleEvent(ev) {
 	}
 	else if (ev.type === "rescan") {
 		rescanResults.set(ev.station, ev);
+		// the game forgot the directions of signals for both directions: work them out again
+		for (const k of [...signalDirsChecked.keys()]) if (k.startsWith(ev.station + "|")) signalDirsChecked.delete(k);
 		log("配線を読み直しました：" + rescanSummary(ev).join("、"));
 		refreshTracks().then(render);
 	}
@@ -692,6 +694,7 @@ function computeLayout() {
 		L.sidings.forEach((sd, i) => sd.tiles.forEach(t => L.sidingOf.set(key(t.p), i)));
 	}
 	buildLevers(L);
+	L.station = station()?.id;   // the station the layout was worked out for
 	layout = L;
 }
 

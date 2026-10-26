@@ -62,6 +62,7 @@ function renderHeader() {
 	const oi = document.getElementById("ownerInfo");
 	const mayOperate = !st || info.player === undefined || info.player === st.owner || info.player === 1 || (st.operators || []).includes(info.player);
 	oi.className = "ownerinfo" + (mayOperate ? "" : " bad");
+	if (!isNetworkMode()) syncSignalDirections(st, mayOperate);
 	oi.textContent = !st ? "" : mayOperate ? `所有：${companyName(st.owner)}` :
 		`⚠ ゲームで操作中の会社が「${companyName(info.player)}」です。この駅は「${companyName(st.owner)}」の駅なので操作できません。ゲームで会社を切り替えてください`;
 	for (const b of document.querySelectorAll("#modeBox button")) {

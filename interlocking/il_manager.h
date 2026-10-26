@@ -157,6 +157,10 @@ struct il_station_t {
 	/// relay: side a signal lever turns to, set by hand (otherwise the panel decides): 'L' / 'R'
 	vector_tpl<koord3d> side_pos;
 	vector_tpl<uint8> side_val;
+	/// a signal for both directions: the directions (ribi) in which the panel leads trains away from it.
+	/// Set by the panel (where destinations lie); a signal not listed: not known yet (only the routes tell)
+	vector_tpl<koord3d> dir_pos;
+	vector_tpl<uint8> dir_val;
 	/// relay: an extra shunting lever at a start point: 'W' = shunting signal (入換信号機, white),
 	/// 'G' = shunting indicator (入換標識, green; may lead up to a train standing on the track)
 	vector_tpl<koord3d> shunt_pos;

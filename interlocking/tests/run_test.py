@@ -470,6 +470,8 @@ def run(args):
         halt2 = p.request("halts")["halts"][1]
         check(p.cmd(f"st_newh,{hp(halt2['tiles'][0])},Hold")["ok"], f"a station for the stop {halt2['name']} (no area yet)")
         rot = simple_tool_id("TOOL_ROTATE90")
+        sg0 = p.status()["stations"][0]["signals"][0]["pos"]
+        check(p.cmd(f"sig_dir,{sid},{sg0[0]},{sg0[1]},{sg0[2]},2")["ok"], "S1 handles the east (as a signal for both directions would)")
         before = p.status()
         p.request(f"debug_tool {rot} ")
         p.wait_event(lambda e: e["type"] == "rotated", 30)
@@ -490,12 +492,16 @@ def run(args):
         check(lv_after and lv_after[0]["pos"] != [9, 5, 0], f"point levers follow the rotation ({[l['pos'] for l in lv_after]})")
         check(d_after["pos"] != [13, 5, 0] and d_after["pos"] in d_after["tiles"], f"virtual departure follows the rotation ({d_after['pos']})")
         check(s_after["pos"] != [3, 5, 0] and s_after["aspect"] != "missing", f"signal follows the rotation ({s_after['pos']})")
+        r_s1 = next(r for r in after["routes"] if r["tiles"][0] == s_after["pos"])
+        dx, dy = r_s1["tiles"][1][0] - s_after["pos"][0], r_s1["tiles"][1][1] - s_after["pos"][1]
+        check(s_after.get("hd") == {(0, -1): 1, (1, 0): 2, (0, 1): 4, (-1, 0): 8}[(dx, dy)], f"the direction of S1 turns with the map, like its routes ({s_after.get('hd')})")
         for _ in range(3):
             p.request(f"debug_tool {rot} ")
             p.wait_event(lambda e: e["type"] == "rotated", 30)
         check([r["tiles"] for r in p.status()["routes"]] == [r["tiles"] for r in before["routes"]], "four rotations restore the route tiles")
         check(p.status()["stations"][0]["levers"] == before["stations"][0]["levers"], "four rotations restore the point levers")
         check(p.status()["stations"][0]["signals"][0]["pos"] == [3, 5, 0], "four rotations restore the signal position")
+        check(p.status()["stations"][0]["signals"][0].get("hd") == 2, "four rotations restore the direction of S1")
         check(p.status()["stations"][0]["area_of"] == before["stations"][0]["area_of"], "four rotations restore the areas of the levers")
         check(panel()["parts"] == pn["parts"], "four rotations restore the tiles of the custom panel (its drawing is kept)")
         check(info()["rot"] == 0, "four turns: north where it was")
@@ -506,6 +512,8 @@ def run(args):
         set_ok = wait_until(lambda: next((rid for rid in (r2["id"], rb["id"], r1["id"]) if p.cmd(f"set,{rid}")["ok"]), None), 90, "a free route to set")
         check(True, f"route {set_ok} set before saving")
         check(p.cmd(f"cp_begin,{sid}")["ok"] and p.cmd(f"cp_add,{sid},T/1/1/4/1/0/3:5:0+4:5:0/")["ok"], "an upload of a custom panel, interrupted by saving (a client joins)")
+        sg = p.status()["stations"][0]["signals"][0]["pos"]
+        check(p.cmd(f"sig_dir,{sid},{sg[0]},{sg[1]},{sg[2]},10")["ok"], "the directions of a signal (as for one for both directions)")
         saved = p.status()
         p.request("debug_save il_test")
         time.sleep(2)
@@ -527,6 +535,8 @@ def run(args):
                                  st["siding_halts"], [d.get("shunt", False) for d in st["departures"]],
                                  st["pairs"], st["sides"], st["shunt_levers"], st["kind"], st["rot"], st["t_approach"], st["t_shunt"], st["t_throw"], st["operators"], st["slevers"], [x["pos"] for x in st["points"]], st["areas"], st["area_of"], st.get("view")) for st in sts]
         check(strip_st(loaded["stations"]) == strip_st(saved["stations"]), "stations restored (name, owner, mode, signals, virtual departures)")
+        hds = lambda sts: [[sg.get("hd") for sg in st["signals"]] for st in sts]
+        check(hds(loaded["stations"]) == hds(saved["stations"]) and 10 in hds(loaded["stations"])[0], f"directions of signals restored ({hds(loaded['stations'])})")
         strip = lambda rs: [(r["id"], r["name"], r["state"], r["tiles"]) for r in rs]
         check(strip(loaded["routes"]) == strip(saved["routes"]), "routes and their states restored")
         pl = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/panel?id={loaded['stations'][0]['id']}").read())
