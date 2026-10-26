@@ -22,6 +22,7 @@
 #include "../vehicle/simvehicle.h"
 #include "../dataobj/schedule.h"
 #include <set>
+#include "il_eta.h"
 
 // the panel never needs more than this
 #define IL_QUERY_MAX_AREA   160
@@ -108,6 +109,98 @@ void il_query::get_tracks_json(cbuffer_t &buf, koord p1, koord p2)
 		first = false;
 	}
 	buf.append("}}");
+}
+
+
+// Time until the convoy reaches the end of its route (its next stop), for the delay of the network view.
+// Read only; it uses the convoy's public accessors (the core has only two one-line getters for it, H9).
+// Speed limits of the convoy (and the convoys coupled to it), of the schedule and of the track; the steps
+// still to go on the current tile, diagonal tiles, the braking countdown of the last tiles and where a train
+// stops inside the last tile, like convoi_t::sync_step() / hop(). No acceleration, slopes or signals.
+static bool panel_ticks_until_arrival(const convoi_t *cnv, uint32 &ticks)
+{
+	ticks = 0;
+	const route_t *route = cnv->get_route();
+	const uint32 count = route ? route->get_count() : 0;
+	if(  !cnv->get_vehicle_count()  ||  !count  ||  cnv->get_min_top_speed() <= 0  ) {
+		return false;
+	}
+	const vehicle_t *front = cnv->front();
+	const uint32 index = front->get_route_index();
+	if(  !index  ||  index > count  ||  route->at(index - 1) != front->get_pos()  ) {
+		return false;
+	}
+
+	sint32 train_limit = cnv->get_min_top_speed();
+	sint64 power = 0;
+	convoihandle_t c = cnv->self;
+	while(  c.is_bound()  ) {
+		power += c->get_sum_gear_and_power();
+		if(  c->get_schedule()  &&  c->get_schedule()->get_max_speed()  ) {
+			train_limit = min(train_limit, kmh_to_speed(c->get_schedule()->get_max_speed()));
+		}
+		if(  c->get_max_speed_kmh_of_convoi()  ) {
+			train_limit = min(train_limit, kmh_to_speed(c->get_max_speed_kmh_of_convoi()));
+		}
+		c = c->get_coupling_convoi();
+	}
+	if(  cnv->get_max_balance_speed_convoi()  ) {
+		train_limit = min(train_limit, kmh_to_speed(cnv->get_max_balance_speed_convoi()));
+	}
+	if(  cnv->get_sum_gesamtweight()  &&  power > 0  ) {
+		train_limit = min(train_limit, convoi_t::calc_max_speed(power, cnv->get_sum_gesamtweight(), train_limit));
+	}
+
+	il_eta_t eta;
+	for(  uint32 i = index - 1;  i < count;  i++  ) {
+		const grund_t *gr = world()->lookup(route->at(i));
+		const weg_t *way = gr ? gr->get_weg(front->get_waytype(), route->get_corner_set(i)) : NULL;
+		if(  !way  ) {
+			return false;
+		}
+		sint32 limit = min(train_limit, kmh_to_speed(way->get_max_speed()));
+		if(  cnv->get_use_electric()  ) {
+			limit = min(limit, kmh_to_speed(way->get_max_wayobj_speed()));
+		}
+		if(  cnv->is_in_delay_recovery()  ) {
+			limit += kmh_to_speed(5);
+		}
+		// the same final-tile countdown as calc_acceleration(), without a route-length margin
+		// or speed average from already travelled track
+		const uint32 left = count - 1 - i;
+		static const uint32 braking_kmh[] = { 25, 50, 100, 200 };
+		if(  left < 4  ) {
+			limit = min(limit, kmh_to_speed(braking_kmh[left]));
+		}
+		if(  limit <= 0  ) {
+			return false;
+		}
+		uint32 steps;
+		if(  i == index - 1  ) {
+			steps = (uint32)front->get_steps_next() + (i + 1 < count ? 1 : 0);
+			steps -= min(steps, (uint32)front->get_steps());
+		}
+		else {
+			steps = ribi_t::is_bend(route->get_corner_set(i)) ? vehicle_base_t::get_diagonal_vehicle_steps_per_tile() : VEHICLE_STEPS_PER_TILE;
+			if(  i + 1 == count  ) {
+				// a train arriving at a station stops part way through the final tile (hop())
+				const ribi_t::ribi dir = ribi_type(route->at(i - 1), route->at(i));
+				steps--;
+				if(  dir == ribi_t::north  ||  dir == ribi_t::west  ||  dir == ribi_t::southeast  ) {
+					steps = steps / 2 + 1;
+				}
+				else if(  dir == ribi_t::northeast  ) {
+					steps = steps / 4 + 1;
+				}
+				else if(  dir == ribi_t::northwest  ||  dir == ribi_t::southwest  ) {
+					steps = 1;
+				}
+			}
+		}
+		eta.add(steps, limit, cnv->get_speed_magnification());
+	}
+	ticks = eta.ticks();
+	return true;
 }
 
 
@@ -209,7 +302,7 @@ void il_query::get_network_json(cbuffer_t &buf, koord3d seed)
 			if(  target && target->get_halt().is_bound()  ) {
 				buf.append(",\"next_halt\":"); append_json_string(buf, target->get_halt()->get_name());
 				uint32 ticks;
-				if(  c->calc_panel_ticks_until_arrival(ticks)  ) {
+				if(  panel_ticks_until_arrival(c.get_rep(), ticks)  ) {
 					buf.printf(",\"eta_seconds\":%u", (uint32)((uint64)ticks * 86400 / welt->ticks_per_world_month));
 				}
 			}
