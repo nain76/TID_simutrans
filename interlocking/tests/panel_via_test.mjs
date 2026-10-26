@@ -64,7 +64,7 @@ try {
 	check(loop.includes("4,6,0") && loop.includes("7,7,0") && !loop.includes("7,5,0"), `with the via point the route goes round the loop (${loop.join(" ")})`);
 	const r = (await st()).routes.find(x => x.state !== "idle");
 	check(r.name.includes("経由"), `its name says so: ${r.name}`);
-	check(await page.evaluate(() => viaTiles.length === 0), "the via points are dropped once the route is set");
+	check(await page.evaluate(() => routeVia.length === 0), "the via points are dropped once the route is set");
 	await page.waitForFunction(() => status.routes.some(r => r.state === "set"), null, { timeout: 5000 });
 	await s1().click();
 	await waitFor(async () => !(await routeTiles()), 8000, "route cancelled");
@@ -75,7 +75,7 @@ try {
 	await page.evaluate(() => viaClicked([2, 5, 0]));   // behind S1: no way there
 	check(await page.locator("svg g.clickable.dest.blink").count() === 0, "no destination is lit for an impossible via point");
 	await page.keyboard.press("Escape");
-	check(await page.evaluate(() => viaTiles.length === 0 && !!nxStart), "Esc drops the via points (the start stays chosen)");
+	check(await page.evaluate(() => routeVia.length === 0 && !!nxStart), "Esc drops the via points (the start stays chosen)");
 	await s1().click();
 
 	console.log("[4] relay panel: lever, via point, destination");
