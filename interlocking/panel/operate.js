@@ -5,31 +5,58 @@
 // operating: point levers, start lever + destination buttons
 // ---------------------------------------------------------------------------
 let nxStart = null;   // selected start lever: { pos, dep }
-// via points (経由) for the next route, in order: the route has to pass these tiles. They belong to the start
-// they were chosen for (viaFor) and are dropped when another start is chosen or the route is set.
-let viaTiles = [], viaFor = null;
-const startKey = (start) => start ? leverKey(start.pos, start.shunt) : null;
-const viasOf = (start) => start && viaFor === startKey(start) ? viaTiles : [];
-function clearVias() { viaTiles = []; viaFor = null; }
-// a click on a track tile while a start is chosen: it becomes a via point (again: it is dropped)
+// via points (経由・中継点) of the next route, in the order the route passes them (positions). They belong to
+// the start they were chosen for (routeViaContext: station, tab, start) and are dropped when that changes or
+// the route is set. Chosen with the "経" buttons behind the junctions (at any time), or, after 「経由を指定」
+// (routeViaPicking), by clicking tracks, points, signals and destinations in turn (also for a route made by
+// hand in the setup tab).
+let routeVia = [], routeViaContext = "", routeViaPicking = false;
+const ROUTE_VIA_MAX = 16;
+function routeViaStart() {
+	if (tab === "setup") return manualRoute?.start ? { pos: manualRoute.start } : null;
+	return tab === "run" ? currentStart() : null;
+}
+function syncRouteVia() {
+	const start = routeViaStart();
+	const context = start ? `${stationId}|${tab}|${key(start.pos)}|${!!start.shunt}` : "";
+	if (context !== routeViaContext) { routeVia = []; routeViaPicking = false; routeViaContext = context; }
+	return start;
+}
+function routeViaProgress(path, via = routeVia) {
+	let i = 0;
+	for (const t of path) if (i < via.length && key(t.p || t) === key(via[i])) i++;
+	return i;
+}
+const viasOf = () => routeVia.map(key);   // the via points as keys (for drawing)
+function clearVias() { routeVia = []; routeViaPicking = false; }
+// a "経" button (or a via point already chosen): chosen, or dropped again
 function viaClicked(pos) {
-	const start = currentStart();
+	const start = syncRouteVia();
 	if (!start) return false;
 	const k = key(pos);
-	if (viaFor !== startKey(start)) { viaTiles = []; viaFor = startKey(start); }
 	if (k === key(start.pos)) return true;
-	if (viaTiles.includes(k)) viaTiles = viaTiles.filter(x => x !== k);
-	else if (viaTiles.length >= 3) { toast("経由は 3 か所までです", true); return true; }
-	else viaTiles.push(k);
-	if (viaTiles.length && !findDestinations(start).size) toast("この経由では、どの着点へも進路が引けません（線路の向き・ポイントを確認）", true);
+	const i = routeVia.findIndex(p => key(p) === k);
+	if (i >= 0) routeVia.splice(i, 1);
+	else if (routeVia.length >= ROUTE_VIA_MAX) { toast(`経由は ${ROUTE_VIA_MAX} か所までです`, true); return true; }
+	else routeVia.push(pos.slice());
+	if (routeVia.length && tab === "run" && !findDestinations(start).size) toast("この経由では、どの着点へも進路が引けません（線路の向き・ポイントを確認）", true);
 	render();
 	return true;
+}
+// after 「経由を指定」: a click on a track, point, signal or destination adds a via point
+function addRouteVia(pos) {
+	const start = syncRouteVia();
+	if (!start || !routeViaPicking) return false;
+	if (key(pos) === key(start.pos) || routeVia.some(p => key(p) === key(pos))) { toast("始点や指定済みの経由は追加できません"); return true; }
+	if (routeVia.length >= ROUTE_VIA_MAX) { toast(`経由は ${ROUTE_VIA_MAX} か所までです`); return true; }
+	if (!stationTiles?.has(key(pos))) { toast("連動盤の範囲内の線路を選択してください"); return true; }
+	routeVia.push(pos.slice()); render(); return true;
 }
 // tiles just behind a junction the route from this start may take, where some destination can still be
 // reached: offered as via buttons (worked out again only when the start, the track or the points change)
 let viaMemo = { sig: null, res: null };
 function viaCandidates(start) {
-	const sig = startKey(start) + "|" + tracksSig + "|" + JSON.stringify(pointLevers()) + "|" + viasOf(start).join(";");
+	const sig = key(start.pos) + (start.shunt ? "|S" : "") + "|" + tracksSig + "|" + JSON.stringify(pointLevers()) + "|" + viasOf().join(";");
 	if (viaMemo.sig !== sig) viaMemo = { sig, res: computeViaCandidates(start) };
 	return new Set(viaMemo.res);
 }
@@ -61,9 +88,64 @@ function computeViaCandidates(start) {
 	}
 	// only where a route can go on to a destination (after the via points already chosen)
 	res.delete(key(start.pos));
-	const chosen = viasOf(start);
-	for (const k of [...res]) if (chosen.includes(k) || !findDestinations(start, chosen.concat([k])).size) res.delete(k);
+	const chosen = viasOf();
+	for (const k of [...res]) if (chosen.includes(k) || !findDestinations(start, routeVia.concat([k.split(",").map(Number)])).size) res.delete(k);
 	return res;
+}
+// a chosen via point: its number (pressed again: dropped)
+function drawRouteViaMarker(parent, x, y, index, scale, pos) {
+	const g = el("g", { class: "route-waypoint via on clickable", "data-via": key(pos) }, parent);
+	el("circle", { cx: x, cy: y, r: Math.max(10, 10 * scale), fill: "var(--yellow)", stroke: "#1a1a1a", "stroke-width": 2 }, g);
+	el("text", { x, y: y + 4, "font-size": 12, "font-weight": 700, "text-anchor": "middle", fill: "#1a1a1a", "pointer-events": "none" }, g).textContent = index + 1;
+	g.appendChild(el("title", {})).textContent = `経由 ${index + 1}（押すと外す）`;
+	g.addEventListener("click", (e) => { e.stopPropagation(); viaClicked(pos); });
+}
+// the bar of the via points (run tab, and the setup tab while a route is made by hand)
+function renderRouteVia() {
+	const start = syncRouteVia(), box = document.getElementById("routeViaBar");
+	const host = document.getElementById(tab === "setup" ? "manualRouteViaControls" : "routeViaHost");
+	if (box.parentElement !== host) host.appendChild(box);
+	box.hidden = !(start || (tab === "setup" && manualRoute)) || isNetworkMode();
+	if (box.hidden) return;
+	const html = `<button id="routeViaPick" ${start ? "" : "disabled"} class="${routeViaPicking ? "on" : ""}" aria-pressed="${routeViaPicking}">${routeViaPicking ? "経由の指定を終了" : "経由を指定"}</button>
+		<button id="routeViaUndo" ${routeVia.length ? "" : "disabled"}>1つ戻す</button><button id="routeViaClear" ${routeVia.length ? "" : "disabled"}>経由を消去</button>
+		<span>${routeVia.length ? routeVia.map((p, i) => `${i + 1}: (${p.join(", ")})`).join(" → ") : "経由なし"}</span>
+		<span class="hint">${!start ? "まず地図上の始点の信号または仮想出発信号をクリックしてください" : routeViaPicking ? "線路を通過する順にクリックし、追加が終わったら「経由の指定を終了」を押してください。今は着点をクリックしても経由として追加されます。" : tab === "setup" ? "経由を指定するか、地図上の着点の線路をクリックして名前を入力してください" : "分岐の先の「経」ボタンでも経由を指定できます。着点を選択してください"}</span>`;
+	if (box.dataset.html === html) return;
+	box.innerHTML = box.dataset.html = html;
+	box.querySelector("#routeViaPick").onclick = () => { routeViaPicking = !routeViaPicking; render(); };
+	box.querySelector("#routeViaUndo").onclick = () => { routeVia.pop(); render(); };
+	box.querySelector("#routeViaClear").onclick = () => { routeVia = []; render(); };
+}
+// Explicit paths for manually registered routes use the same ordered checkpoints.
+function manualPathVia(start, end, via = routeVia) {
+	const t0 = tileIndex.get(key(start));
+	if (!t0 || !tileIndex.has(key(end))) return null;
+	const queue = [{ t: t0, dir: 0, progress: 0, prev: null }], seen = new Set();
+	for (let head = 0; head < queue.length; head++) {
+		const n = queue[head], k = key(n.t.p);
+		const progress = n.progress + (n.progress < via.length && k === key(via[n.progress]) ? 1 : 0);
+		const state = `${k}|${n.dir}|${progress}`;
+		if (seen.has(state)) continue;
+		seen.add(state);
+		if (k === key(end) && progress === via.length) {
+			const path = []; for (let at = n; at; at = at.prev) path.unshift(at.t.p);
+			return path;
+		}
+		const exits = n.prev ? n.t.m & ~BACK[n.dir] : isDepartureAnchor(station(), start) ? n.t.r : n.t.m;
+		for (const d of DIRS) if (exits & d) {
+			const t = neighbour(n.t, d);
+			if (!t || !stationTiles?.has(key(t.p))) continue;
+			let repeated = false; for (let at = n; at; at = at.prev) if (key(at.t.p) === key(t.p)) { repeated = true; break; }
+			if (!repeated) queue.push({ t, dir: d, progress, prev: n });
+		}
+	}
+	return null;
+}
+function routePathCommand(kind, st, path, name) {
+	const command = `${kind},${st.id},${path.map(p => (p.p || p).join(":")).join(";")},${name}`;
+	if (new TextEncoder().encode(command).length > 4000) { toast("進路が長すぎるため送信できません。進路を分けてください"); return null; }
+	return command;
 }
 // point lever positions are part of the game (saved, shared in network games)
 function pointLevers() {
@@ -137,7 +219,8 @@ function setLever(li, pos) {
  * track in the direction of travel and the manually set points. free = no train and no
  * other route on it.
  */
-function findDestinations(start, vias = viasOf(start)) {
+function findDestinations(start, via = routeVia) {
+	const vias = via.map(key);
 	const st = station();
 	const res = new Map(); // id -> { label, path, free }
 	const t0 = tileIndex.get(key(start.pos));
@@ -237,6 +320,52 @@ function findDestinations(start, vias = viasOf(start)) {
 			}
 		}
 	}
+	// Destination buttons honour the paths registered in setup, like the shortcuts; a blocked or invalid
+	// registered path never falls back to another branch. Via points chosen by the operator come first:
+	// then the way is searched as chosen.
+	if (!via.length) {
+		const registered = new Map();
+		for (const r of status.routes) {
+			if (r.temp || r.station !== st.id || key(r.start) !== key(start.pos) || !r.tiles?.length) continue;
+			const end = key(r.end), gi = layout.groupOf.get(end), si = layout.sidingOf.get(end);
+			const id = gi !== undefined && gi !== startGroup ? "p" + gi : si !== undefined && si !== startSiding ? "s" + si :
+				exitAt.has(end) ? "x" + exitAt.get(end) : tileIndex.get(end)?.d ? "d" + end : null;
+			if (!id || (id[0] === "x" && start.shunt && start.color !== "P")) continue;
+			if (!registered.has(id)) registered.set(id, []);
+			registered.get(id).push(r);
+		}
+		for (const [id, definitions] of registered) {
+			res.delete(id); res.delete("n" + id);
+			for (const r of definitions) {
+				let path = r.tiles.map(p => tileIndex.get(key(p)));
+				if (path.length < 2 || path.some(t => !t || !stationTiles.has(key(t.p))) || new Set(r.tiles.map(key)).size !== path.length) continue;
+				const directions = path.slice(1).map((t, i) => DIRS.find(d => neighbour(path[i], d) === t));
+				if (directions.some(d => !d) || !firstDirs.includes(directions[0])) continue;
+				let valid = true;
+				for (let i = 1; i < directions.length; i++) {
+					const came = BACK[directions[i - 1]], out = directions[i], pt = pointAt.get(key(path[i].p));
+					const pairs = pt ? allowedPairs(pt, levers[key(path[i].p)]) : null;
+					if (out === came || !(path[i].m & out) || (pairs && !pairs.some(p => p.includes(came) && p.includes(out)))) { valid = false; break; }
+				}
+				if (!valid) continue;
+				const label = id[0] === "p" ? platformName(st, Number(id.slice(1))) : id[0] === "s" ? sidingName(st, Number(id.slice(1))) : id[0] === "x" ? exitName(st, Number(id.slice(1))) : "車庫";
+				const group = id[0] === "p" ? layout.groups[Number(id.slice(1))] : id[0] === "s" ? layout.sidings[Number(id.slice(1))].tiles : null;
+				if (group) path = extend(path, directions.at(-1), null, group);
+				const record = (target, tiles) => {
+					if (routeViaProgress(tiles, via) !== via.length) return;
+					const free = !tiles.slice(1).some(t => blocked.has(key(t.p)));
+					if (!res.has(target) || (free && !res.get(target).free)) res.set(target, { label: label + (target === id ? "" : "手前"), path: tiles, free, registeredName: r.name });
+				};
+				record(id, path);
+				if (allowShort && group) {
+					const groupKeys = new Set(group.map(t => key(t.p)));
+					const entry = path.findIndex(t => groupKeys.has(key(t.p)));
+					const stop = path.findIndex((t, i) => i > 0 && blocked.has(key(t.p)));
+					if (entry >= 0 && stop > entry) record("n" + id, path.slice(0, stop));
+				}
+			}
+		}
+	}
 	return res;
 }
 
@@ -244,6 +373,7 @@ function findDestinations(start, vias = viasOf(start)) {
 function currentStart() { return isRelay() ? relayStart() : nxStart; }
 
 function startClicked(pos, dep, sh = false) {
+	if (addRouteVia(pos)) return;
 	const st = station();
 	if (isRelay()) { turnSignalLever(pos, sleverOf(st, pos) ? "N" : null); return; }
 	if (!st.manual) { toast("自動モードです。「扱者」に切り替えてください", true); return; }
@@ -269,16 +399,19 @@ function destinationClicked(id) {
 	const d = findDestinations(start).get(id);
 	if (!d) { toast("この着点へは進路が引けません（線路の向き・ポイントを確認）"); return; }
 	if (!d.free) { toast("在線しているか、ほかの進路と重なるため引けません"); return; }
-	const name = `${signalLabel(st, start.pos)}${start.shunt ? (start.color === "P" ? "誘導" : "入換") : ""}→${d.label}${viasOf(start).length ? "（経由）" : ""}`;
+	const name = d.registeredName || `${signalLabel(st, start.pos)}${start.shunt ? (start.color === "P" ? "誘導" : "入換") : ""}→${d.label}${routeVia.length ? "（経由）" : ""}`;
 	// electronic panel: say that the shunting / calling-on lever of the start is used
 	const cmdName = !isRelay() && start.shunt ? "set_path_s" : "set_path";
-	command(`${cmdName},${st.id},${d.path.map(t => t.p.join(":")).join(";")},${name}`, "進路設定 " + name);
+	const cmd = routePathCommand(cmdName, st, d.path, name);
+	if (!cmd) return;
+	command(cmd, "進路設定 " + name);
 	nxStart = null;
 	clearVias();
 	render();
 }
 
 function pointClicked(i) {
+	if (addRouteVia(layout.points[i].t.p)) return;
 	const lo = layout.leverOf.get(i);
 	if (!lo) return;
 	const ls = leverState(lo.li);

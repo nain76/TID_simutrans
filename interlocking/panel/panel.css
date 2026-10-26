@@ -58,6 +58,12 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 #viewbar button { font-size: 12px; padding: 3px 10px; border-radius: 12px; }
 #viewbar button.on { background: #1f4f86; border-color: #2c6cb5; color: var(--text); }
+#routeViaBar { padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel2); }
+#routeViaBar button { margin-right: 6px; }
+#routeViaBar button.on { background: #1f4f86; }
+#manualRouteViaControls #routeViaBar { border: 1px solid var(--accent); border-radius: 6px; margin: 8px 0; }
+#manualRouteViaControls #routeViaBar .hint { display: block; margin-top: 8px; }
+#map .route-waypoint { pointer-events: none; }
 #viewbar .compass { margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--text); }
 #viewbar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
 aside {
@@ -219,3 +225,23 @@ body.relay .cfgbox .kinds button.on { background: #2e6b45; border-color: #46c06b
 .sidegrid { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; }
 .sidegrid label { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; }
 .sidegrid select { padding: 1px 4px; font-size: 12px; }
+#networkClock { color: var(--text); font-variant-numeric: tabular-nums; }
+#networkTrains { max-height: 300px; overflow: auto; }
+#networkTrains .item { display: block; overflow-wrap: anywhere; border-left: 3px solid var(--occupied); }
+#operationFile, #operationDiagram { max-width: 100%; }
+#operationEarly, #operationLate { width: 90px; }
+body.network-mode #mapwrap, body.network-mode #modeBox, body.network-mode #ownerInfo { display: none; }
+body.network-mode aside { width: 100%; max-width: none; }
+body.network-mode #networkTrains { max-height: none; }
+#networkMapWrap { overflow: auto; height: 60vh; min-height: 280px; background: #0f1319; border: 1px solid var(--line); margin-bottom: 12px; }
+#networkMap { display: block; }
+#networkMap .network-track { fill: none; stroke: var(--track); stroke-width: 2; }
+#networkMap .network-track.occupied { stroke: var(--occupied); stroke-width: 4; }
+#networkMap .network-platform { fill: var(--platform); }
+#networkMap text { fill: var(--text); font-size: var(--network-label-size, 14px); paint-order: stroke; stroke: #0f1319; stroke-width: var(--network-label-outline, 2px); }
+#networkMap .network-station-label { font-weight: 600; }
+#networkMap .network-label-leader { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.network-delay-late { color: var(--occupied); }
+#networkMap tspan.network-delay-late { fill: var(--occupied); }
+.station-alias-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.station-alias-row input { flex: 1; min-width: 160px; }

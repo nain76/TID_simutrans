@@ -635,6 +635,9 @@ static void handle_http(client_t &c, char *head, const char *body)
 	if(  strcmp(target, "/api/status") == 0  ) {
 		il->get_status_json(json);
 	}
+	else if(  strcmp(target, "/api/operations") == 0  ) {
+		il->get_operations_json(json, true, (uint32)max(0, get_query_int(query, "offset", 0)));
+	}
 	else if(  strcmp(target, "/api/events") == 0  ) {
 		get_events_json(json, (uint32)get_query_int(query, "since", 0));
 	}
@@ -648,6 +651,10 @@ static void handle_http(client_t &c, char *head, const char *body)
 		il_query::get_tracks_json(json,
 			koord((sint16)get_query_int(query, "x1", 0), (sint16)get_query_int(query, "y1", 0)),
 			koord((sint16)get_query_int(query, "x2", 0), (sint16)get_query_int(query, "y2", 0)));
+	}
+	else if(  strcmp(target, "/api/network") == 0  ) {
+		il_query::get_network_json(json, koord3d((sint16)get_query_int(query, "x", -1),
+			(sint16)get_query_int(query, "y", -1), (sint8)get_query_int(query, "z", -128)));
 	}
 	else if(  strcmp(target, "/api/info") == 0  ) {
 		karte_t *welt = world();

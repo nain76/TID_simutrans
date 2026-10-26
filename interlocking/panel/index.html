@@ -9,6 +9,14 @@
 <body>
 <header>
 	<h1>TID 連動盤</h1>
+	<select id="panelMode" aria-label="表示モード">
+		<option value="legacy">連動盤</option>
+		<option value="network">全区間在線</option>
+	</select>
+	<select id="stationNameMode" aria-label="駅名の表示方法">
+		<option value="game">駅名：ゲーム内</option>
+		<option value="alias">駅名：エイリアス</option>
+	</select>
 	<span class="conn"><span class="dot" id="conndot"></span><span id="conntext">接続中…</span></span>
 	<select id="stationSel" title="連動駅"></select>
 	<div class="mode" id="modeBox">
@@ -23,9 +31,18 @@
 	</nav>
 </header>
 <main>
-	<div id="mapwrap"><div id="viewbar"></div><svg id="map"></svg><div class="empty" id="mapEmpty">連動駅がありません。「設定」タブで駅を作成してください。</div></div>
+	<div id="mapwrap"><div id="viewbar"></div><div id="routeViaHost"><div id="routeViaBar" hidden></div></div><svg id="map"></svg><div class="empty" id="mapEmpty">連動駅がありません。「設定」タブで駅を作成してください。</div></div>
 	<aside>
 		<section id="tab-run">
+			<div id="networkRun" hidden>
+			<h2>接続区間の在線 <span id="networkClock"></span></h2>
+			<p class="hint" id="networkSummary"></p>
+			<div class="row"><button id="networkZoomOut" aria-label="全区間地図を縮小">−</button><button id="networkFit">全体を表示</button><button id="networkZoomIn" aria-label="全区間地図を拡大">＋</button><span class="hint">灰：線路　赤：在線　丸：信号（マウスを重ねると詳細）</span></div>
+			<p class="hint" id="networkMapHint"></p>
+			<div id="networkMapWrap"><svg id="networkMap" role="img" aria-label="接続する全区間の線形と信号配置"></svg></div>
+			<div id="networkTrains" class="list"></div>
+			</div>
+			<div id="legacyRun">
 			<h2>接近表示</h2>
 			<div class="approach" id="approach"><span class="hint">待っている列車はありません</span></div>
 			<div id="deskBar" hidden></div>
@@ -47,8 +64,29 @@
 				<span style="--c: var(--occupied)">在線・予約</span>
 				<span style="--c: var(--preview)">進路の表示</span>
 			</div>
+			</div>
 		</section>
 		<section id="tab-setup" hidden>
+			<div id="networkSetup" hidden>
+			<h2>OuDiaSecondV2 運用情報</h2>
+			<p class="hint">ダイヤ未読込・未選択でも全接続区間の在線を表示できます。列車番号・種別・行先を照合する場合にダイヤを選択してください。</p>
+			<p class="hint">旧版で保存されたファイルは、出区・折り返し・増解結などの駅作業から運用を復元します。</p>
+			<p class="hint">ファイルと選択中のダイヤはゲーム共通です。ゲームをセーブするとデータ内に保存され、別PCでも共有されます（UTF-8換算8MiBまで）。</p>
+			<input type="file" id="operationFile" accept=".oud2">
+			<p class="hint" id="operationFileStatus">運用情報を保存した .oud2 ファイルを選択してください。</p>
+			<div class="row"><label>ダイヤ <select id="operationDiagram"></select></label><button id="operationClear">共有ダイヤを解除</button></div>
+			<div class="row"><label>早発の許容時間（秒）<input id="operationEarly" type="number" min="0" max="86399" step="1"></label></div>
+			<div class="row"><label>遅延の許容時間（秒）<input id="operationLate" type="number" min="0" max="86399" step="1"></label></div>
+			<h2>駅名エイリアス</h2>
+			<p class="hint">ゲーム内の駅名 → OuDiaSecondの駅名を設定します。同じゲームの全連動盤・全ブラウザ・ネットワーク参加PCで共有し、セーブデータにも保存します。未設定の駅は同じ名前で照合します。</p>
+			<datalist id="aliasGameNames"></datalist><datalist id="aliasOudNames"></datalist>
+			<div id="stationAliases"></div>
+			<div class="row"><button id="stationAliasAdd">対応を追加</button><button id="stationAliasSave" class="primary">エイリアスを保存</button></div>
+			<p class="hint" id="stationAliasStatus"></p>
+			<p class="hint">車両名を運用番号として照合します。先頭の (数字)・（数字）は除きます。候補が複数ある場合は確定せず表示します。ダイヤの読込・選択・許容時間はこのブラウザに保存されます。</p>
+			<p class="hint">対象駅は上の駅一覧から選択します。連動駅の作成・変更は従来モードの「設定」で行ってください。</p>
+			</div>
+			<div id="legacySetup">
 			<div id="stationCfg"></div>
 			<h2>1. 連動駅を作る</h2>
 			<div class="row">
@@ -131,11 +169,13 @@
 				<button class="primary elec-only" id="btnAutoRoutes">進路を自動作成</button>
 				<button id="btnManualRoute" class="elec-only">手で作る</button>
 			</div>
-			<p class="hint elec-only" id="routeHint">自動作成: 各てこ扱い信号から各番線・留置線へ、各番線の出発信号から区域の出口への進路を作ります。手で作る: 始点の信号 → 着点の線路の順にクリックします。</p>
+			<p class="hint elec-only" id="routeHint">手で作る: 始点を選択 →「中継点を指定」→ 経由する線路を順にクリック →「中継点の指定を終了」→ 着点を選択 → 名前を入力して登録。中継点は省略できます。</p>
+			<div id="manualRouteViaControls" class="elec-only"></div>
 			<div class="list" id="routeList"></div>
 
 			<h2>駅の削除</h2>
 			<button class="danger" id="btnDelStation">この連動駅を削除</button>
+			</div>
 		</section>
 		<section id="tab-log" hidden>
 			<h2>ログ</h2>
@@ -146,6 +186,7 @@
 <div id="toast"></div>
 
 <script src="core.js"></script>
+<script src="traffic.js"></script>
 <script src="operate.js"></script>
 <script src="render.js"></script>
 <script src="relay.js"></script>

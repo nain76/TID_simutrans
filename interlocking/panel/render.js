@@ -36,19 +36,25 @@ function renderFromGame() {
 }
 
 function render() {
+	renderPanelMode();
 	document.body.classList.toggle("relay", isRelay());
 	// the approach buzzer listens on every tab (not only while the relay board is shown)
 	if (station() && isRelay()) checkApproach(station());
 	renderHeader();
-	renderViewbar();
-	renderMap();
-	if (tab === "run") renderRun();
-	if (tab === "setup") renderSetup();
+	renderRouteVia();
+	if (isNetworkMode()) {
+		if (tab === "run") renderNetwork();
+	} else {
+		renderViewbar();
+		renderMap();
+		if (tab === "run") renderRun();
+		if (tab === "setup") renderSetup();
+	}
 }
 
 function renderHeader() {
 	const sel = document.getElementById("stationSel");
-	const opts = status.stations.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+	const opts = status.stations.map(s => `<option value="${s.id}">${esc(displayStationName(s.name))}</option>`).join("");
 	if (sel.dataset.opts !== opts) { sel.innerHTML = opts || "<option>（連動駅なし）</option>"; sel.dataset.opts = opts; }
 	if (station()) sel.value = stationId;
 	const st = station();
@@ -178,7 +184,7 @@ function renderMap() {
 			el("text", { x: cx(t.p), y: cy(t.p) + 4, "font-size": 11 * sc, "text-anchor": "middle", fill: "#e6e9ee" }, g).textContent = "車";
 		}
 		// a click target for creating routes by hand
-		const hit = el("rect", { x: cx(t.p) - CELL / 2, y: cy(t.p) - CELL / 2, width: CELL, height: CELL, fill: "transparent", class: manualRoute || depTool || (tab === "run" && currentStart()) ? "clickable" : "" }, g);
+		const hit = el("rect", { x: cx(t.p) - CELL / 2, y: cy(t.p) - CELL / 2, width: CELL, height: CELL, fill: "transparent", class: manualRoute || depTool || routeViaPicking || (tab === "run" && currentStart()) ? "clickable" : "", "data-route-tile": k }, g);
 		hit.addEventListener("click", () => tileClicked(t));
 		hit.appendChild(el("title", {})).textContent = `(${t.p.join(", ")}) ${layerName(t.p[2])}` + (t.c ? " " + (tracks.convoys[t.c] || "") : "");
 	}
@@ -223,7 +229,7 @@ function renderMap() {
 		const ps = pointState(pt);
 		const color = ps.locked && ps.by ? "var(--locked)" : ps.manual ? "var(--accent)" : "#6b7687";
 		const x = cx(t.p), y = cy(t.p);
-		const grp = el("g", { class: tab === "run" ? "clickable" : "" }, g);
+		const grp = el("g", { class: tab === "run" || manualRoute?.start ? "clickable" : "", "data-route-point": key(t.p) }, g);
 		el("circle", { cx: x, cy: y, r: 9 * sc, fill: "#141a24", stroke: color, "stroke-width": 2 }, grp);
 		const legs = new Set();
 		for (const pr of ps.pairs || []) for (const leg of pr) legs.add(leg);
@@ -234,7 +240,10 @@ function renderMap() {
 		block(x - 9 * sc, y - 9 * sc, x + 9 * sc, y + 9 * sc, 3);
 		label(grp, x, y, 9 * sc, pointName(st, i), { "font-size": Math.max(10, 10 * sc), fill: "#9fb3cf" });
 		grp.appendChild(el("title", {})).textContent = `${pointName(st, i)} ` + (ps.by ? `鎖錠中（${ps.by}）` : posName(ps.manual) + (ps.pairs ? `（${pairsText(ps.pairs)}）` : "")) + "（クリックで 自動→定位→反位 と切り替え）";
-		if (tab === "run") grp.addEventListener("click", (e) => { e.stopPropagation(); pointClicked(i); });
+		if (tab === "run" || manualRoute?.start) grp.addEventListener("click", (e) => {
+			e.stopPropagation();
+			if (tab === "setup") tileClicked(t); else pointClicked(i);
+		});
 	});
 	// destination buttons (着点): lit when reachable from the selected start lever
 	if (st && tab === "run") {
@@ -255,8 +264,8 @@ function renderMap() {
 			block(x - br - 2, y - br - 2, x + br + 2, y + br + 2, 3);
 			label(grp, x, y, br + 2, name, { "font-size": 11, "font-weight": 600, fill: lit ? "#1a1a1a" : "#dfe6f0" },
 				{ fill: lit ? "var(--yellow)" : "#20283a", stroke: lit || dim ? "var(--yellow)" : "#3a4558" });
-			grp.appendChild(el("title", {})).textContent = `着点ボタン：${name}` + (lit ? "（押すと進路を引きます）" : dim ? "（在線・他の進路と重なるため今は引けません）" : "");
-			grp.addEventListener("click", (e) => { e.stopPropagation(); destinationClicked(id); });
+			grp.appendChild(el("title", {})).textContent = `着点ボタン：${name}` + (d?.registeredName ? `　登録進路：${d.registeredName}` : "") + (lit ? "（押すと進路を引きます）" : dim ? "（在線・他の進路と重なるため今は引けません）" : "");
+			grp.addEventListener("click", (e) => { e.stopPropagation(); if (!addRouteVia(t.p)) destinationClicked(id); });
 		};
 		layout.groups.forEach((gr, i) => {
 			const mid = gr.slice().sort((a, b) => a.p[0] - b.p[0] || a.p[1] - b.p[1])[Math.floor(gr.length / 2)];
@@ -273,10 +282,9 @@ function renderMap() {
 		if (start) {
 			const t = tileIndex.get(key(start.pos));
 			if (t) el("circle", { cx: cx(t.p), cy: cy(t.p), r: 16 * sc, fill: "none", stroke: "var(--yellow)", "stroke-width": 3, class: "blink", "pointer-events": "none" }, g);
-			// via buttons (経由): behind each junction the route may take; the chosen ones lit and numbered
-			const vias = viasOf(start);
+			// via buttons (経由): behind each junction the route may take (the chosen ones: numbered markers below)
+			const vias = viasOf();
 			const cand = viaCandidates(start);
-			for (const k of vias) cand.add(k);
 			for (const k of cand) {
 				const vt = tileIndex.get(k);
 				if (!vt || !isVisible(vt)) continue;
@@ -285,7 +293,7 @@ function renderMap() {
 				const grp = el("g", { class: "clickable via" + (n >= 0 ? " on" : ""), "data-via": k }, g);
 				el("circle", { cx: x, cy: y, r: vr + 1.5, fill: n >= 0 ? "var(--yellow)" : "#2b3342", stroke: "var(--yellow)", "stroke-width": 1.5 }, grp);
 				el("text", { x, y: y + vr * .55, "font-size": vr * 1.5, "font-weight": 700, "text-anchor": "middle", fill: n >= 0 ? "#1a1a1a" : "var(--yellow)", "pointer-events": "none" }, grp).textContent = n >= 0 ? String(n + 1) : "経";
-				grp.appendChild(el("title", {})).textContent = n >= 0 ? `経由 ${n + 1}（押すと外す）` : "経由ボタン：押すと、この線路を通る進路だけになります（3 か所まで、押した順に通る）";
+				grp.appendChild(el("title", {})).textContent = n >= 0 ? `経由 ${n + 1}（押すと外す）` : "経由ボタン：押すと、この線路を通る進路だけになります（16 か所まで、押した順に通る）";
 				grp.addEventListener("click", (e) => { e.stopPropagation(); viaClicked(vt.p); });
 			}
 		}
@@ -308,6 +316,10 @@ function renderMap() {
 		const grp = el("g", { class: (tab === "run" || depTool ? "clickable" : "") + (mayHandle(st, d.pos) ? "" : " other") }, g);
 		if (depTool) grp.addEventListener("click", (e) => { e.stopPropagation(); depToolClicked(d.pos); });
 		else if (tab === "run") grp.addEventListener("click", (e) => { e.stopPropagation(); startClicked(d.pos, true); });
+		else if (tab === "setup" && manualRoute) grp.addEventListener("click", (e) => {
+			e.stopPropagation();
+			if (!manualRoute.start) { manualRoute.start = d.pos; render(); } else tileClicked(t);
+		});
 		if (d.shunt) {
 			// virtual shunting signal: a diamond (lit white when a route is set)
 			el("path", { d: `M${x} ${y - r * 1.25} L${x + r * 1.25} ${y} L${x} ${y + r * 1.25} L${x - r * 1.25} ${y} Z`, fill: clear ? "#f4f4f4" : "var(--red)", stroke: "#fff", "stroke-width": 2 }, grp);
@@ -335,7 +347,7 @@ function renderMap() {
 		if (!t.h || named.has(t.h) || !isVisible(t)) continue;
 		named.add(t.h);
 		const hl = halts.find(x => x.id === t.h);
-		if (hl) label(g, cx(t.p), cy(t.p) - CELL / 2, 2, hl.name, { "font-size": 11, fill: "#9fb3cf" });
+		if (hl) label(g, cx(t.p), cy(t.p) - CELL / 2, 2, displayStationName(hl.name), { "font-size": 11, fill: "#9fb3cf" });
 	}
 	placeLabels();
 	// choosing game tiles for a part of the custom panel
@@ -360,6 +372,8 @@ function renderMap() {
 		}
 	}
 
+	for (let i = 0; i < routeVia.length; i++) drawRouteViaMarker(g, cx(routeVia[i]), cy(routeVia[i]), i, sc, routeVia[i]);
+
 	// a signal lever drawn on the map (relay panel): knob, aspect lamp ahead, number
 	function mapKnob(pos, x, y, dx, dy, sh = false) {
 		const v = leverView(st, pos, sh);
@@ -378,7 +392,7 @@ function renderMap() {
 		if (sc < 1.6) label(grp, x, y, r + 1, String(v.no), { "font-size": Math.max(10, 10 * sc), "font-weight": 700, fill: "#e8e4d4" });
 
 		grp.appendChild(el("title", {})).textContent = `${v.no} ${signalLabel(st, pos)}${sh ? " 入換てこ" : ""}：${v.sl ? "反位（もう一度押すと定位）" : "押すと開通方向にひねる"}${v.state ? "　" + v.state : ""}`;
-		grp.addEventListener("click", (e) => { e.stopPropagation(); turnSignalLever(pos, v.sl ? "N" : null, sh); });
+		grp.addEventListener("click", (e) => { e.stopPropagation(); if (!addRouteVia(pos)) turnSignalLever(pos, v.sl ? "N" : null, sh); });
 		grp.addEventListener("mouseenter", () => setHoverLever(mk));
 		grp.addEventListener("mouseleave", () => setHoverLever(null));
 	}
@@ -458,7 +472,7 @@ function renderRun() {
 
 	// approach indication: a train holds an interlocked signal at danger
 	// the line (路線) of the train names its type (普通・快速 …): shown first, then the train and its next stop
-	const train = (x) => `${lineBadge(x.line)}${esc(x.train)}${x.dest ? ` <span class="hint">次 ${esc(x.dest)}</span>` : ""}`;
+	const train = (x) => `${lineBadge(x.line)}${esc(x.train)}${x.dest ? ` <span class="hint">次 ${esc(displayStationName(x.dest))}</span>` : ""}`;
 	const waiting = st.signals.filter(s => s.train && s.aspect === "red").map(s => `<div>${esc(signalLabel(st, s.pos))}：${train(s)} 待機中</div>`);
 	const leaving = (st.departures || []).filter(d => d.train && d.waiting && !status.routes.some(r => key(r.start) === key(d.pos) && r.state !== "idle"))
 		.map(d => `<div>${esc(signalLabel(st, d.pos))}：${train(d)} ${d.shunt ? "入換待ち" : "発車待ち"}</div>`);
@@ -788,8 +802,10 @@ function renderSetup() {
 	});
 	}
 	document.getElementById("routeHint").textContent = manualRoute ?
-		(manualRoute.start ? "着点の線路（番線の端など）をクリックしてください。（Esc で中止）" : "始点のてこ扱い信号をクリックしてください。（Esc で中止）") :
-		"自動作成: 各てこ扱い信号から各番線・留置線へ、出発信号から区域の出口への進路を作ります。手で作る: 始点の信号 → 着点の線路の順にクリックします。";
+		(!manualRoute.start ? "手順1: 地図上の始点のてこ扱い信号または仮想出発信号をクリックしてください。（Esc で中止）" : routeViaPicking ?
+			"手順2: 経由する線路を通過順にクリックしてください。終わったら下の「経由の指定を終了」を押してください。（最大16か所）" :
+			`${routeVia.length ? "手順3" : "手順2"}: 経由を指定する場合は下の「経由を指定」を押してください。指定済み、または不要なら地図上の着点の線路をクリックし、進路名を入力して登録してください。（Esc で中止）`) :
+		"手で作る: 始点を選択 →「経由を指定」→ 経由する線路を順にクリック →「経由の指定を終了」→ 着点を選択 → 名前を入力して登録。経由は省略できます。自動作成では各信号・出発点から到達できる進路をまとめて登録します。";
 	document.getElementById("btnManualRoute").textContent = manualRoute ? "中止" : "手で作る";
 	for (const b of document.querySelectorAll("[data-deptool]")) b.classList.toggle("on", depTool === b.dataset.deptool);
 	const dh = document.getElementById("depToolHint");

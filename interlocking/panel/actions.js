@@ -9,12 +9,20 @@ function leverClicked(r) {
 	if (isRelay()) { toast("継電の盤では、信号てこで扱います", true); return; }
 	if (!st.manual) { toast("自動モードです。「扱者」に切り替えてください", true); return; }
 	if (refuseOther(st, r.start)) return;
+	if (routeVia.length && r.state === "idle") {
+		const start = currentStart();
+		if (!start || key(start.pos) !== key(r.start)) { toast("経由を指定した始点と進路の始点が異なります"); return; }
+		const target = [...findDestinations(start)].find(([, d]) => key(d.path.at(-1).p) === key(r.end));
+		if (!target) { toast("指定した経由を通る進路がありません"); return; }
+		destinationClicked(target[0]); return;
+	}
 	if (r.state === "idle") command("set," + r.id, "進路設定 " + r.name);
 	else if (r.state === "set") command("cancel," + r.id, "進路取消 " + r.name);
 	else toast("列車が進入中です。通過すると自動で解除されます", true);
 }
 
 function signalClicked(t, interlocked) {
+	if (addRouteVia(t.p)) return;
 	if (tab === "setup") {
 		if (manualRoute && !manualRoute.start) {
 			if (!interlocked) { toast("始点は、てこ扱い信号に登録した信号を選んでください"); return; }
@@ -55,15 +63,20 @@ for (const b of document.querySelectorAll("[data-deptool]")) b.addEventListener(
 
 async function tileClicked(t) {
 	if (depToolClicked(t.p)) return;
+	if (addRouteVia(t.p)) return;
 	if (tab === "run" && !manualRoute && viaClicked(t.p)) return;
 	if (!manualRoute || !manualRoute.start) return;
 	const st = station();
 	const start = manualRoute.start;
+	const path = routeVia.length ? manualPathVia(start, t.p) : null;
+	if (routeVia.length && !path) { toast("指定した経由を順に通る進路がありません"); return; }
 	const name = prompt("進路の名前", `${signalLabel(st, start)}→(${t.p[0]},${t.p[1]})`);
+	const cmd = path ? routePathCommand("rt_path", st, path, name || "") : `rt_def,${st.id},${start.join(",")},${t.p.join(",")},${name}`;
+	if (name && !cmd) return;
 	manualRoute = null;
 	render();
 	if (!name) return;
-	const r = await commandResult(`rt_def,${st.id},${start.join(",")},${t.p.join(",")},${name}`);
+	const r = await commandResult(cmd);
 	if (!r.ok) toast(tr(r.error));
 }
 
@@ -285,8 +298,8 @@ document.getElementById("mapwrap").addEventListener("wheel", (e) => {
 	setZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
 }, { passive: false });
 document.addEventListener("keydown", (e) => {
-	if (e.key === "Escape" && (manualRoute || depTool)) { manualRoute = null; depTool = null; render(); }
-	else if (e.key === "Escape" && viaTiles.length) { clearVias(); render(); }   // the via points are dropped first
+	if (e.key === "Escape" && (manualRoute || depTool)) { manualRoute = null; depTool = null; clearVias(); render(); }
+	else if (e.key === "Escape" && (routeViaPicking || routeVia.length)) { clearVias(); render(); }   // the via points are dropped first
 });
 
 (async () => {

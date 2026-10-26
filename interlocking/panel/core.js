@@ -70,6 +70,7 @@ const ERRORS = {
 	"unknown kind of magnet": "マグネットの種類が分かりません",
 	"upload of the panel was interrupted": "カスタム盤の送信が途中で途切れました。もう一度「適用」を押してください",
 	"bad panel part": "カスタム盤の部品が読めません",
+	"diagram upload interrupted or changed": "ダイヤの送信が中断されたか、ほかの盤で更新されました。もう一度操作してください",
 };
 const tr = (e) => {
 	if (e === "not owner") {
@@ -207,7 +208,9 @@ function handleEvent(ev) {
 		pending.delete(ev.command);
 		if (!ev.ok && mine) for (const [k, a] of shownAhead) if (a.cmd === ev.command) shownAhead.delete(k);
 		waiters = waiters.filter(w => { if (w.cmd === ev.command) { w.resolve(ev); return false; } return true; });
-		log((mine ? "" : "（ほかの操作者）") + (ev.ok ? "OK  " : "NG  ") + label + (ev.ok ? "" : " … " + tr(ev.error)), ev.ok ? "ok" : "err");
+		// the many parts of a diagram upload are not logged one by one
+		if (!ev.ok || !ev.command.startsWith("oud_part,"))
+			log((mine || ev.command.startsWith("oud_") ? "" : "（ほかの操作者）") + (ev.ok ? "OK  " : "NG  ") + (ev.command.startsWith("oud_") ? "ダイヤ共通設定" : label) + (ev.ok ? "" : " … " + tr(ev.error)), ev.ok ? "ok" : "err");
 		if (mine && !ev.ok && !ev.command.startsWith("rt_def") && !ev.command.startsWith("rt_path")) toast(tr(ev.error));
 	}
 	else if (ev.type === "route") {
@@ -247,7 +250,7 @@ function handleEvent(ev) {
 
 async function rotateAreas() {
 	// the game turns the areas it keeps
-	try { info = await api("/api/info"); } catch (e) { return; }
+	try { info = await api("/api/info"); halts = (await api("/api/halts")).halts; } catch (e) { return; }
 	log("マップが回転しました");
 	await refreshTracks();
 	render();
@@ -255,6 +258,8 @@ async function rotateAreas() {
 
 async function refreshStatus() {
 	status = await api("/api/status");
+	syncSharedStationAliases(status);
+	syncSharedOperations(status);
 	if (!station() && status.stations.length) selectStation(status.stations[0].id, true);
 }
 async function refreshTracks() {
@@ -484,6 +489,7 @@ async function loop() {
 		await refreshStatus();
 		await pollEvents();
 		await refreshTracks();
+		await refreshNetwork();
 		// the company the game operates with (the player may switch companies in the game)
 		if (++infoTick % 4 === 0) { try { info = await api("/api/info"); } catch (e) {} }
 		setConnected(true);
@@ -644,7 +650,7 @@ function sidingName(st, i) {
 		// a stop used as a siding: its name (numbered when it has several tracks)
 		const hl = halts.find(h => h.id === sd.halt);
 		const same = layout.sidings.filter(x => x.halt === sd.halt);
-		if (hl) return hl.name + (same.length > 1 ? same.indexOf(sd) + 1 : "");
+		if (hl) return displayStationName(hl.name) + (same.length > 1 ? same.indexOf(sd) + 1 : "");
 	}
 	return "留置" + (i + 1);
 }

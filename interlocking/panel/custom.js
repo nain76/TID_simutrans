@@ -191,6 +191,8 @@ function gridOfTile(parts, k) {
 		const f = p.b.length > 1 ? i / (p.b.length - 1) : .5;
 		return [p.x1 + (p.x2 - p.x1) * f, p.y1 + (p.y2 - p.y1) * f];
 	}
+	const symbol = parts.find(p => ["P", "S", "D"].includes(p.t) && (p.b || []).some(t => key(t) === k));
+	if (symbol) return [symbol.x1, symbol.y1];
 	return null;
 }
 
@@ -244,21 +246,31 @@ function renderCustom() {
 			if ((p.b || []).some(t => { const tt = tileIndex.get(key(t)); return tt && tt.c; })) color = "var(--occupied)";
 			el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: bad ? "#5a6475" : color, "stroke-width": 6 * sc, "stroke-linecap": "round", "stroke-dasharray": bad ? "6 5" : "" }, grp);
 			if (cpEdit) el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: "transparent", "stroke-width": 14 }, grp);
-			// a start chosen: the line is a via button (経由) when a route may take it
-			const start = !cpEdit && tab === "run" ? currentStart() : null;
-			if (start && (p.b || []).length) {
-				const vias = viasOf(start), cand = viaCandidates(start);
+			// a start chosen: the line is a via button (経由) when a route may take it (the chosen ones: numbered markers)
+			else if ((routeViaPicking || manualRoute?.start) && p.b?.length) {
+				const hit = el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: "transparent", "stroke-width": Math.max(14, 14 * sc), class: "clickable", "data-route-part": i }, grp);
+				hit.addEventListener("click", e => {
+					e.stopPropagation();
+					const point = svg.createSVGPoint(); point.x = e.clientX; point.y = e.clientY;
+					const at = point.matrixTransform(grp.getScreenCTM().inverse()), dx = X(p.x2 - p.x1), dy = Y(p.y2 - p.y1);
+					const f = dx || dy ? ((at.x - X(p.x1)) * dx + (at.y - Y(p.y1)) * dy) / (dx * dx + dy * dy) : 0;
+					const pos = p.b[Math.max(0, Math.min(p.b.length - 1, Math.round(f * (p.b.length - 1))))];
+					const t = tileIndex.get(key(pos)); if (t) tileClicked(t);
+				});
+			}
+			else if (!cpEdit && tab === "run" && currentStart() && (p.b || []).length) {
+				const start = currentStart();
+				const vias = viasOf(), cand = viaCandidates(start);
 				const keys = p.b.map(key);
-				const n = vias.findIndex(k => keys.includes(k));
-				const pick = keys.find(k => cand.has(k));
-				if (n >= 0 || pick) {
+				const pick = !keys.some(k => vias.includes(k)) && keys.find(k => cand.has(k));
+				if (pick) {
 					const vx = X((p.x1 + p.x2) / 2), vy = Y((p.y1 + p.y2) / 2), vr = 5.5 * Math.max(.8, sc);
-					const vg = el("g", { class: "clickable via" + (n >= 0 ? " on" : ""), "data-via": n >= 0 ? vias[n] : pick }, grp);
+					const vg = el("g", { class: "clickable via", "data-via": pick }, grp);
 					el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: "transparent", "stroke-width": 14 }, vg);
-					el("circle", { cx: vx, cy: vy, r: vr + 1.5, fill: n >= 0 ? "var(--yellow)" : "#2b3342", stroke: "var(--yellow)", "stroke-width": 1.5 }, vg);
-					el("text", { x: vx, y: vy + vr * .55, "font-size": vr * 1.5, "font-weight": 700, "text-anchor": "middle", fill: n >= 0 ? "#1a1a1a" : "var(--yellow)", "pointer-events": "none" }, vg).textContent = n >= 0 ? String(n + 1) : "経";
-					vg.appendChild(el("title", {})).textContent = n >= 0 ? `経由 ${n + 1}（押すと外す）` : "経由ボタン：押すと、この線路を通る進路だけになります";
-					vg.addEventListener("click", (e) => { e.stopPropagation(); viaClicked((n >= 0 ? vias[n] : pick).split(",").map(Number)); });
+					el("circle", { cx: vx, cy: vy, r: vr + 1.5, fill: "#2b3342", stroke: "var(--yellow)", "stroke-width": 1.5 }, vg);
+					el("text", { x: vx, y: vy + vr * .55, "font-size": vr * 1.5, "font-weight": 700, "text-anchor": "middle", fill: "var(--yellow)", "pointer-events": "none" }, vg).textContent = "経";
+					vg.appendChild(el("title", {})).textContent = "経由ボタン：押すと、この線路を通る進路だけになります";
+					vg.addEventListener("click", (e) => { e.stopPropagation(); viaClicked(pick.split(",").map(Number)); });
 				}
 			}
 		}
@@ -270,19 +282,23 @@ function renderCustom() {
 			if (pi >= 0) {
 				el("text", { x: X(p.x1), y: Y(p.y1) - 9 * sc, "font-size": Math.max(9, 9 * sc), fill: "#9fb3cf", "text-anchor": "middle" }, grp).textContent = pointName(st, pi);
 				if (!cpEdit && tab === "run") { grp.classList.add("clickable"); grp.addEventListener("click", (e) => { e.stopPropagation(); pointClicked(pi); }); }
+				else if (!cpEdit && tab === "setup" && manualRoute?.start) { grp.classList.add("clickable"); grp.addEventListener("click", e => { e.stopPropagation(); tileClicked(layout.points[pi].t); }); }
 			}
 		}
 		else if (p.t === "D") {
 			const id = destIdOf(p);
 			const d = dests.get(id);
 			const lit = d && d.free, dim = d && !d.free;
+			if (d?.registeredName) el("title", {}, grp).textContent = `登録進路：${d.registeredName}`;
 			const br = 7 * Math.max(.8, sc * .9);
 			const x = X(p.x1), y = Y(p.y1);
 			if (lit) grp.classList.add("blink");
 			el("circle", { cx: x, cy: y, r: br + 1.6, fill: "#3b4250", stroke: lit || dim ? "var(--yellow)" : "#11151b", "stroke-width": lit || dim ? 2 : 1, "stroke-dasharray": dim || bad ? "3 2" : "" }, grp);
 			el("circle", { cx: x, cy: y, r: br, fill: bad ? "#5a6475" : lit ? "var(--yellow)" : "#e6e3d8" }, grp);
 			el("text", { x, y: y + br + 12, "font-size": 11, "font-weight": 600, fill: lit ? "var(--yellow)" : "#dfe6f0", "text-anchor": "middle" }, grp).textContent = p.s ? partText(p) : destName(st, id);
-			if (!cpEdit && tab === "run" && id) { grp.classList.add("clickable"); grp.addEventListener("click", (e) => { e.stopPropagation(); destinationClicked(id); }); }
+			if (!cpEdit && p.b?.length && (routeViaPicking || (tab === "setup" && manualRoute?.start))) {
+				grp.classList.add("clickable"); grp.addEventListener("click", e => { e.stopPropagation(); const t = tileIndex.get(key(p.b[0])); if (t) tileClicked(t); });
+			} else if (!cpEdit && tab === "run" && id) { grp.classList.add("clickable"); grp.addEventListener("click", (e) => { e.stopPropagation(); destinationClicked(id); }); }
 		}
 		else if (p.t === "S") drawStart(grp, st, p, X(p.x1), Y(p.y1), sc, bad);
 		else if (p.t === "L") {
@@ -321,6 +337,10 @@ function renderCustom() {
 			el("polygon", { points: `${x},${y + r - 3} ${x + 4},${y} ${x - 4},${y}`, fill: "#8a94a3" }, k);
 			el("text", { x, y: y - r - 3, "font-size": 10, fill: "#cfd6e0", "text-anchor": "middle" }, grp).textContent = "北";
 		}
+	}
+	for (let i = 0; i < routeVia.length; i++) {
+		const at = gridOfTile(parts, key(routeVia[i]));
+		if (at) drawRouteViaMarker(g, X(at[0]), Y(at[1]), i, sc, routeVia[i]);
 	}
 	// a line being drawn with ＋線路
 	if (cpEdit && cpEdit.drawing) {
@@ -371,6 +391,14 @@ function drawStart(grp, st, p, x, y, sc, bad) {
 	}
 	const other = !mayHandle(st, pos);
 	if (other) grp.classList.add("other");
+	if (!cpEdit && tab === "setup" && manualRoute) {
+		grp.classList.add("clickable");
+		grp.addEventListener("click", e => {
+			e.stopPropagation();
+			if (!manualRoute.start) { manualRoute.start = pos; render(); }
+			else { const t = tileIndex.get(key(pos)); if (t) tileClicked(t); }
+		});
+	}
 	if (isRelay()) {
 		const v = leverView(st, pos, sh);
 		const k = .42 * sc, r = 22 * k;
@@ -380,7 +408,7 @@ function drawStart(grp, st, p, x, y, sc, bad) {
 		el("text", { x, y: y + r + 11, "font-size": Math.max(9, 10 * sc), fill: "#e8e4d4", "text-anchor": "middle" }, grp).textContent = signalLabel(st, pos) + (sh ? " 入換" : "");
 		if (!cpEdit && tab === "run") {
 			grp.classList.add("clickable");
-			grp.addEventListener("click", (e) => { e.stopPropagation(); turnSignalLever(pos, v.sl ? "N" : null, sh); });
+			grp.addEventListener("click", (e) => { e.stopPropagation(); if (!addRouteVia(pos)) turnSignalLever(pos, v.sl ? "N" : null, sh); });
 		}
 		return;
 	}

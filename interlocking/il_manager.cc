@@ -10,6 +10,7 @@
 #include "il_manager.h"
 #include "il_json.h"
 #include "il_blob.h"
+#include "il_aliases.h"
 
 #include "../simworld.h"
 #include "../simconvoi.h"
@@ -80,6 +81,8 @@ void interlocking_manager_t::reset()
 	clear_ptr_vector(stations);
 	clear_ptr_vector(routes);
 	clear_ptr_vector(stage);
+	alias_game_names.clear(); alias_dia_names.clear();
+	operations.reset();
 	stage_station = 0;
 	next_id = 1;
 	push_event("{\"type\":\"reset\"}");
@@ -899,6 +902,24 @@ static uint32 split_param(char *buf, char **fields, uint32 max_fields)
 }
 
 
+static bool decode_alias_name(const char *input, plainstring &name)
+{
+	char out[513]; size_t n = 0;
+	for(  size_t i = 0; input[i]; i++  ) {
+		unsigned char c = (unsigned char)input[i];
+		if(  c == '%'  ) {
+			if(  !input[i + 1] || !input[i + 2]  ) return false;
+			const char hex[] = { input[i + 1], input[i + 2], 0 };
+			char *end = NULL; const long value = strtol(hex, &end, 16);
+			if(  end != hex + 2 || value < 0 || value > 255  ) return false;
+			c = (unsigned char)value; i += 2;
+		}
+		if(  c < 32 || c == 127 || n >= sizeof(out) - 1  ) return false;
+		out[n++] = (char)c;
+	}
+	out[n] = 0; name = out; return n != 0;
+}
+
 const char *interlocking_manager_t::execute(const char *param, player_t *player)
 {
 	if(  param == NULL  ) {
@@ -940,7 +961,38 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 	const char *cmd = f[0];
 	const char *error = NULL;
 
-	if(  strcmp(cmd, "st_newh") == 0  &&  n >= 3  ) {
+	if(  strncmp(cmd, "oud_", 4) == 0  ) {
+		bool ok = false;
+		uint32 value = 0;
+		if(  strcmp(cmd, "oud_begin") == 0 && n == 5 && il_operations_t::number(f[3], value)  ) {
+			plainstring name;
+			if(  decode_alias_name(f[4], name)  ) ok = operations.begin(f[1], f[2], value, name.c_str());
+		}
+		else if(  strcmp(cmd, "oud_part") == 0 && n == 4 && il_operations_t::number(f[2], value)  ) ok = operations.part(f[1], value, f[3]);
+		else if(  strcmp(cmd, "oud_commit") == 0 && n == 2  ) ok = operations.commit(f[1]);
+		else if(  strcmp(cmd, "oud_clear") == 0 && n == 2  ) ok = operations.clear(f[1]);
+		else if(  strcmp(cmd, "oud_select") == 0 && n == 3  ) {
+			if(  strcmp(f[2], "-1") == 0  ) ok = operations.select(f[1], -1);
+			else if(  il_operations_t::number(f[2], value) && value <= 32767  ) ok = operations.select(f[1], (sint16)value);
+		}
+		if(  !ok  ) error = "diagram upload interrupted or changed";
+	}
+	else if(  (strcmp(cmd, "alias_set") == 0 && n == 3) || (strcmp(cmd, "alias_del") == 0 && n == 2)  ) {
+		plainstring game, dia;
+		const bool remove = strcmp(cmd, "alias_del") == 0;
+		if(  !decode_alias_name(f[1], game) || (!remove && !decode_alias_name(f[2], dia))  ) error = "bad setting";
+		else {
+			uint32 i = 0;
+			for(  ; i < alias_game_names.get_count(); i++  ) if(  strcmp(alias_game_names[i].c_str(), game.c_str()) == 0  ) break;
+			if(  remove  ) {
+				if(  i < alias_game_names.get_count()  ) { alias_game_names.remove_at(i); alias_dia_names.remove_at(i); }
+			}
+			else if(  i < alias_game_names.get_count()  ) alias_dia_names[i] = dia;
+			else if(  alias_game_names.get_count() >= 512  ) error = "bad setting";
+			else { alias_game_names.append(game); alias_dia_names.append(dia); }
+		}
+	}
+	else if(  strcmp(cmd, "st_newh") == 0  &&  n >= 3  ) {
 		// a station for a stop: st_newh,<x:y:z of a platform tile>,<name>; one interlocking panel per stop
 		koord3d hpos = koord3d::invalid;
 		int hx, hy, hz;
@@ -2954,8 +3006,9 @@ void interlocking_manager_t::rdwr(loadsave_t *file)
 
 
 // format of the data block (independent of IL_SAVE_VERSION, which belongs to the old format)
-#define IL_BLOCK_VERSION 17
-// far more than any station needs (a few hundred kilobytes for a large game)
+// 17: custom panel being uploaded, 18: station name aliases, 19: OuDiaSecond diagram
+#define IL_BLOCK_VERSION 19
+// far more than any station needs (a few hundred kilobytes for a large game; a diagram up to 8 MB)
 #define IL_MAX_BLOCK (64u * 1024u * 1024u)
 
 void interlocking_manager_t::save_block(loadsave_t *file)
@@ -3231,6 +3284,12 @@ void interlocking_manager_t::rdwr_blob(il_blob_t &b)
 		future_fields(b);
 		b.end_section();
 	}
+	if(  version >= 18  ) {
+		il_rdwr_station_aliases(b, alias_game_names, alias_dia_names);
+	}
+	if(  version >= 19  ) {
+		operations.rdwr(b);
+	}
 	if(  !b.loading  &&  getenv("TID_IL_TEST_FUTURE")  ) {
 		// a whole section of a later version
 		b.begin_section();
@@ -3359,6 +3418,24 @@ void interlocking_manager_t::get_panel_json(cbuffer_t &buf, uint16 station) cons
 }
 
 
+void interlocking_manager_t::get_operations_json(cbuffer_t &buf, bool include_source, uint32 offset) const
+{
+	buf.append("{\"id\":"); append_json_string(buf, operations.key());
+	buf.append(",\"file\":"); append_json_string(buf, operations.file.c_str() ? operations.file.c_str() : "");
+	buf.printf(",\"bytes\":%u,\"diagram\":%d", operations.source.get_count(), operations.diagram);
+	if(  include_source  ) {
+		// Keep each HTTP response small even when synchronizing a large diagram.
+		const uint32 end = min(operations.source.get_count(), offset > operations.source.get_count() ? operations.source.get_count() : offset + 4096);
+		static const char hex[] = "0123456789abcdef";
+		buf.printf(",\"offset\":%u,\"data\":\"", offset);
+		for(  uint32 i = offset; i < end; i++  ) {
+			char pair[] = {hex[operations.source[i] >> 4], hex[operations.source[i] & 15], 0}; buf.append(pair);
+		}
+		buf.append("\"");
+	}
+	buf.append("}");
+}
+
 void interlocking_manager_t::get_status_json(cbuffer_t &buf) const
 {
 	// the game time for the clock of a custom panel
@@ -3367,7 +3444,13 @@ void interlocking_manager_t::get_status_json(cbuffer_t &buf) const
 	buf.printf(",\"month\":%u", world() ? (uint32)world()->get_current_month() : 0u);
 	// time of day as in OTRP: one month is one day (ticks of this month / ticks of a month)
 	buf.printf(",\"tick_m\":%u,\"tpm\":%u", world() ? (uint32)(world()->get_ticks() % world()->ticks_per_world_month) : 0u, world() ? (uint32)world()->ticks_per_world_month : 1u);
-	buf.append(",\"stations\":[");
+	buf.append(",\"operations\":"); get_operations_json(buf, false);
+	buf.append(",\"station_aliases\":[");
+	for(  uint32 i = 0; i < alias_game_names.get_count(); i++  ) {
+		buf.append(i ? ",[" : "["); append_json_string(buf, alias_game_names[i].c_str());
+		buf.append(","); append_json_string(buf, alias_dia_names[i].c_str()); buf.append("]");
+	}
+	buf.append("],\"stations\":[");
 	bool first = true;
 	FOR(vector_tpl<il_station_t *>, st, stations) {
 		buf.append(first ? "" : ",");
