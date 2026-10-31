@@ -60,6 +60,10 @@
 // magnets and memos of a station
 #define IL_MAX_MARKS 500
 
+// line panels (路線盤) of a game
+#define IL_MAX_LINES 32
+#define IL_MAX_LINE_NAME 256
+
 /// revision of custom panels (only for the browsers on this computer: not part of the game state)
 static uint32 panel_rev_counter = 0;
 
@@ -81,6 +85,9 @@ void interlocking_manager_t::reset()
 	clear_ptr_vector(stations);
 	clear_ptr_vector(routes);
 	clear_ptr_vector(stage);
+	clear_ptr_vector(lines);
+	clear_ptr_vector(line_stage);
+	line_stage_id = 0;
 	alias_game_names.clear(); alias_dia_names.clear();
 	operations.reset();
 	stage_station = 0;
@@ -975,7 +982,7 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 	else if(  strncmp(buf, "mk_add,", 7) == 0  ) {
 		max_fields = 8;
 	}
-	else if(  strncmp(buf, "pt_set,", 7) == 0  ||  strncmp(buf, "cp_add,", 7) == 0  ) {
+	else if(  strncmp(buf, "pt_set,", 7) == 0  ||  strncmp(buf, "cp_add,", 7) == 0  ||  strncmp(buf, "ln_add,", 7) == 0  ) {
 		max_fields = 3;
 	}
 	char *f[10];
@@ -1461,6 +1468,9 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 			ev.printf("{\"type\":\"panel\",\"station\":%u,\"parts\":%u}", st->id, st->parts.get_count());
 			push_event(ev);
 		}
+	}
+	else if(  strncmp(cmd, "ln_", 3) == 0  ) {
+		error = execute_line(cmd, f, n, player);
 	}
 	else if(  strcmp(cmd, "mk_add") == 0  &&  n >= 7  ) {
 		// a magnet or a memo: mk_add,<station>,x,y,z,<X|M|O>,<colour>[,<text>]
@@ -2161,7 +2171,7 @@ const il_mark_t *interlocking_manager_t::stop_mark_at(koord3d pos) const
 
 
 /// parts of a custom panel: "T/x1/y1/x2/y2/flags/x:y:z+x:y:z/text;..." (the text is encoded by the panel)
-const char *interlocking_manager_t::parse_parts(const char *s, vector_tpl<il_part_t *> &out) const
+const char *interlocking_manager_t::parse_parts(const char *s, vector_tpl<il_part_t *> &out, const char *types) const
 {
 	while(  s  &&  *s  ) {
 		const char *end = strchr(s, ';');
@@ -2186,7 +2196,7 @@ const char *interlocking_manager_t::parse_parts(const char *s, vector_tpl<il_par
 			}
 			*p++ = 0;
 		}
-		if(  nf < 7  ||  !strchr("TSPDHLAFCKY", fld[0][0])  ||  out.get_count() >= IL_MAX_PARTS  ) {
+		if(  nf < 7  ||  !fld[0][0]  ||  !strchr(types, fld[0][0])  ||  out.get_count() >= IL_MAX_PARTS  ) {
 			return "bad panel part";
 		}
 		il_part_t *pt = new il_part_t();
@@ -2217,6 +2227,124 @@ const char *interlocking_manager_t::parse_parts(const char *s, vector_tpl<il_par
 		}
 		out.append(pt);
 	}
+	return NULL;
+}
+
+
+il_line_t *interlocking_manager_t::find_line(uint16 id) const
+{
+	FOR(vector_tpl<il_line_t *>, ln, lines) {
+		if(  ln->id == id  ) {
+			return ln;
+		}
+	}
+	return NULL;
+}
+
+
+/// a name of a line panel, encoded by the panel: plain characters only (it goes into the status as it is)
+static bool good_line_name(const char *s)
+{
+	if(  !s  ||  !*s  ||  strlen(s) > IL_MAX_LINE_NAME  ) {
+		return false;
+	}
+	for(  const char *c = s;  *c;  c++  ) {
+		if(  (unsigned char)*c < 32  ||  *c == ','  ||  *c == ';'  ||  *c == '/'  ) {
+			return false;
+		}
+	}
+	return true;
+}
+
+
+/**
+ * Line panels (路線盤), a view only (no game state depends on them): open to everybody, like the shared diagram.
+ *   ln_new,<name>  ln_name,<id>,<name>  ln_del,<id>  ln_edit,<id>,<0|1>
+ *   ln_begin,<id>  ln_add,<id>,<parts>  ...  ln_end,<id>,<number of parts>   (the parts as for a custom panel)
+ */
+const char *interlocking_manager_t::execute_line(const char *cmd, char **f, uint32 n, const player_t *player)
+{
+	if(  strcmp(cmd, "ln_new") == 0  &&  n >= 2  ) {
+		if(  !good_line_name(f[1])  ) {
+			return "bad name";
+		}
+		if(  lines.get_count() >= IL_MAX_LINES  ) {
+			return "too many line panels";
+		}
+		// the lowest free number: the same on every client
+		uint16 id = 1;
+		while(  find_line(id)  ) {
+			id++;
+		}
+		il_line_t *ln = new il_line_t();
+		ln->id = id;
+		ln->name = f[1];
+		ln->rev = ++panel_rev_counter;
+		lines.append(ln);
+		cbuffer_t ev;
+		ev.printf("{\"type\":\"line\",\"id\":%u,\"new\":true}", id);
+		push_event(ev);
+		return NULL;
+	}
+	il_line_t *ln = n >= 2 ? find_line((uint16)atoi(f[1])) : NULL;
+	if(  ln == NULL  ) {
+		return "unknown line panel";
+	}
+	if(  strcmp(cmd, "ln_name") == 0  &&  n >= 3  ) {
+		if(  !good_line_name(f[2])  ) {
+			return "bad name";
+		}
+		ln->name = f[2];
+	}
+	else if(  strcmp(cmd, "ln_del") == 0  ) {
+		if(  line_stage_id == ln->id  ) {
+			clear_ptr_vector(line_stage);
+			line_stage_id = 0;
+		}
+		lines.remove(ln);
+		delete ln;
+		return NULL;
+	}
+	else if(  strcmp(cmd, "ln_edit") == 0  &&  n >= 3  ) {
+		ln->edit_player = atoi(f[2]) ? (player ? player->get_player_nr() : 1) : 255;
+	}
+	else if(  strcmp(cmd, "ln_begin") == 0  ) {
+		clear_ptr_vector(line_stage);
+		line_stage_id = ln->id;
+	}
+	else if(  strcmp(cmd, "ln_add") == 0  ||  strcmp(cmd, "ln_end") == 0  ) {
+		if(  line_stage_id != ln->id  ) {
+			return "upload of the panel was interrupted";
+		}
+		const char *error = NULL;
+		if(  cmd[3] == 'a'  ) {
+			error = n >= 3 ? parse_parts(f[2], line_stage, "TWBHNLFCY") : "no parts";
+		}
+		else if(  n < 3  ||  (uint32)atoi(f[2]) != line_stage.get_count()  ) {
+			error = "upload of the panel was interrupted";
+		}
+		else {
+			clear_ptr_vector(ln->parts);
+			FOR(vector_tpl<il_part_t *>, p, line_stage) {
+				ln->parts.append(p);
+			}
+			line_stage.clear();
+			line_stage_id = 0;
+			ln->edit_player = 255;
+			ln->rev = ++panel_rev_counter;
+		}
+		if(  error  ) {
+			clear_ptr_vector(line_stage);
+			line_stage_id = 0;
+			return error;
+		}
+	}
+	else {
+		return "unknown command or missing parameters";
+	}
+	cbuffer_t ev;
+	ev.printf("{\"type\":\"line\",\"id\":%u,\"parts\":%u}", ln->id, ln->parts.get_count());
+	push_event(ev);
 	return NULL;
 }
 
@@ -3089,8 +3217,8 @@ void interlocking_manager_t::rdwr(loadsave_t *file)
 
 // format of the data block (independent of IL_SAVE_VERSION, which belongs to the old format)
 // 17: custom panel being uploaded, 18: station name aliases, 19: OuDiaSecond diagram
-// 20: directions of signals for both directions
-#define IL_BLOCK_VERSION 20
+// 20: directions of signals for both directions, 21: line panels
+#define IL_BLOCK_VERSION 21
 // far more than any station needs (a few hundred kilobytes for a large game; a diagram up to 8 MB)
 #define IL_MAX_BLOCK (64u * 1024u * 1024u)
 
@@ -3381,6 +3509,29 @@ void interlocking_manager_t::rdwr_blob(il_blob_t &b)
 	if(  version >= 19  ) {
 		operations.rdwr(b);
 	}
+	if(  version >= 21  ) {
+		// line panels (路線盤), and one being uploaded (a client joining in the middle of it needs it)
+		b.begin_section();
+		uint32 nl = lines.get_count();
+		b.rdwr_long(nl);
+		for(  uint32 i = 0;  i < nl  &&  i < IL_MAX_LINES  &&  !b.broken;  i++  ) {
+			il_line_t *ln = b.loading ? new il_line_t() : lines[i];
+			b.begin_section();
+			b.rdwr_short(ln->id);
+			b.rdwr_str(ln->name);
+			rdwr_parts(b, ln->parts);
+			future_fields(b);
+			b.end_section();
+			if(  b.loading  ) {
+				ln->rev = ++panel_rev_counter;
+				lines.append(ln);
+			}
+		}
+		b.rdwr_short(line_stage_id);
+		rdwr_parts(b, line_stage);
+		future_fields(b);
+		b.end_section();
+	}
 	if(  !b.loading  &&  getenv("TID_IL_TEST_FUTURE")  ) {
 		// a whole section of a later version
 		b.begin_section();
@@ -3486,6 +3637,20 @@ void interlocking_manager_t::rotate90(sint16 y_size)
 			r->tiles[i].rotate90(y_size);
 		}
 	}
+	// line panels: the tiles their parts stand for turn, the drawing stays
+	FOR(vector_tpl<il_line_t *>, ln, lines) {
+		FOR(vector_tpl<il_part_t *>, pt, ln->parts) {
+			for(  uint32 i = 0;  i < pt->bind.get_count();  i++  ) {
+				pt->bind[i].rotate90(y_size);
+			}
+		}
+		ln->rev = ++panel_rev_counter;
+	}
+	FOR(vector_tpl<il_part_t *>, pt, line_stage) {
+		for(  uint32 i = 0;  i < pt->bind.get_count();  i++  ) {
+			pt->bind[i].rotate90(y_size);
+		}
+	}
 	push_event("{\"type\":\"rotated\"}");
 }
 
@@ -3500,6 +3665,25 @@ void interlocking_manager_t::get_panel_json(cbuffer_t &buf, uint16 station) cons
 	buf.printf("{\"type\":\"panel\",\"station\":%u,\"rev\":%u,\"parts\":[", station, st ? st->parts_rev : 0);
 	for(  uint32 i = 0;  st  &&  i < st->parts.get_count();  i++  ) {
 		const il_part_t *pt = st->parts[i];
+		buf.printf("%s{\"t\":\"%c\",\"x1\":%d,\"y1\":%d,\"x2\":%d,\"y2\":%d,\"f\":%u,\"b\":[", i ? "," : "", pt->type, pt->x1, pt->y1, pt->x2, pt->y2, pt->flags);
+		for(  uint32 j = 0;  j < pt->bind.get_count();  j++  ) {
+			buf.append(j ? "," : "");
+			append_json_pos(buf, pt->bind[j]);
+		}
+		buf.append("],\"s\":");
+		append_json_string(buf, pt->text.c_str());
+		buf.append("}");
+	}
+	buf.append("]}");
+}
+
+
+void interlocking_manager_t::get_line_json(cbuffer_t &buf, uint16 line) const
+{
+	const il_line_t *ln = find_line(line);
+	buf.printf("{\"type\":\"line\",\"id\":%u,\"rev\":%u,\"parts\":[", line, ln ? ln->rev : 0);
+	for(  uint32 i = 0;  ln  &&  i < ln->parts.get_count();  i++  ) {
+		const il_part_t *pt = ln->parts[i];
 		buf.printf("%s{\"t\":\"%c\",\"x1\":%d,\"y1\":%d,\"x2\":%d,\"y2\":%d,\"f\":%u,\"b\":[", i ? "," : "", pt->type, pt->x1, pt->y1, pt->x2, pt->y2, pt->flags);
 		for(  uint32 j = 0;  j < pt->bind.get_count();  j++  ) {
 			buf.append(j ? "," : "");
@@ -3544,6 +3728,18 @@ void interlocking_manager_t::get_status_json(cbuffer_t &buf) const
 	for(  uint32 i = 0; i < alias_game_names.get_count(); i++  ) {
 		buf.append(i ? ",[" : "["); append_json_string(buf, alias_game_names[i].c_str());
 		buf.append(","); append_json_string(buf, alias_dia_names[i].c_str()); buf.append("]");
+	}
+	// line panels (路線盤): the parts are fetched with /api/line when rev changes
+	buf.append("],\"lines\":[");
+	for(  uint32 i = 0;  i < lines.get_count();  i++  ) {
+		const il_line_t *ln = lines[i];
+		buf.printf("%s{\"id\":%u,\"name\":", i ? "," : "", ln->id);
+		append_json_string(buf, ln->name.c_str());
+		buf.printf(",\"parts\":%u,\"rev\":%u", ln->parts.get_count(), ln->rev);
+		if(  ln->edit_player != 255  ) {
+			buf.printf(",\"editing\":%u", ln->edit_player);
+		}
+		buf.append("}");
 	}
 	buf.append("],\"stations\":[");
 	bool first = true;

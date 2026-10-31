@@ -38,8 +38,10 @@
 			<h2>接続区間の在線 <span id="networkClock"></span></h2>
 			<p class="hint" id="networkSummary"></p>
 			<div class="row"><button id="networkZoomOut" aria-label="全区間地図を縮小">−</button><button id="networkFit">全体を表示</button><button id="networkZoomIn" aria-label="全区間地図を拡大">＋</button><span class="hint">灰：線路　赤：在線　丸：信号（マウスを重ねると詳細）</span></div>
+			<div id="lineBar" class="row"></div>
 			<p class="hint" id="networkMapHint"></p>
 			<div id="networkMapWrap"><svg id="networkMap" role="img" aria-label="接続する全区間の線形と信号配置"></svg></div>
+			<div id="lineWrap" hidden><svg id="lineMap" role="img" aria-label="路線盤"></svg></div>
 			<div id="networkTrains" class="list"></div>
 			</div>
 			<div id="legacyRun">
@@ -191,6 +193,7 @@
 <script src="render.js"></script>
 <script src="relay.js"></script>
 <script src="custom.js"></script>
+<script src="line.js"></script>
 <script src="marks.js"></script>
 <script src="actions.js"></script>
 </body>

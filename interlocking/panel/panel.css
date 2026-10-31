@@ -245,3 +245,15 @@ body.network-mode #networkTrains { max-height: none; }
 #networkMap tspan.network-delay-late { fill: var(--occupied); }
 .station-alias-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .station-alias-row input { flex: 1; min-width: 160px; }
+
+/* line panels (路線盤): drawn like the TID (blue) */
+#lineBar { flex-wrap: wrap; gap: 4px; align-items: center; }
+#lineBar button { font-size: 12px; padding: 3px 10px; border-radius: 12px; }
+#lineBar button.on { background: #1f4f86; border-color: #2c6cb5; color: var(--text); }
+#lineBar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+#lineWrap { overflow: auto; height: 60vh; min-height: 280px; background: #0a2fb0; border: 1px solid var(--line); margin-bottom: 12px; }
+#lineWrap[hidden], #networkMapWrap[hidden] { display: none; }
+#lineMap { display: block; }
+#lineMap .lnpart { cursor: move; }
+#lineMap .lnpart.sel rect, #lineMap .lnpart.sel line:first-child, #lineMap .lnpart.sel text { filter: drop-shadow(0 0 3px #ffe066); }
+#lineMap .lnhandle { cursor: crosshair; }

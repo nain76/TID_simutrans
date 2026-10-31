@@ -15,6 +15,9 @@ let zoom = Number(localStore("zoom")) || 1;
 const ZOOM_MIN = 0.5, ZOOM_MAX = 6;
 
 const ERRORS = {
+	"unknown line panel": "その路線盤はありません（ほかの人が削除しました）",
+	"too many line panels": "路線盤は32個までです",
+	"bad name": "名前が正しくありません",
 	"another route from this signal is set": "この信号から別の進路が設定されています",
 	"conflicting route is set": "敵対進路が設定されています",
 	"track is occupied": "進路上に列車がいます（在線）",
@@ -209,8 +212,10 @@ function handleEvent(ev) {
 		if (!ev.ok && mine) for (const [k, a] of shownAhead) if (a.cmd === ev.command) shownAhead.delete(k);
 		waiters = waiters.filter(w => { if (w.cmd === ev.command) { w.resolve(ev); return false; } return true; });
 		// the many parts of a diagram upload are not logged one by one
-		if (!ev.ok || !ev.command.startsWith("oud_part,"))
-			log((mine || ev.command.startsWith("oud_") ? "" : "（ほかの操作者）") + (ev.ok ? "OK  " : "NG  ") + (ev.command.startsWith("oud_") ? "ダイヤ共通設定" : label) + (ev.ok ? "" : " … " + tr(ev.error)), ev.ok ? "ok" : "err");
+		// (nor those of a line panel: its parts are long)
+		const shared = ev.command.startsWith("oud_") ? "ダイヤ共通設定" : ev.command.startsWith("ln_") ? "路線盤" : null;
+		if (!ev.ok || !(ev.command.startsWith("oud_part,") || ev.command.startsWith("ln_add,") || ev.command.startsWith("ln_begin,")))
+			log((mine || shared ? "" : "（ほかの操作者）") + (ev.ok ? "OK  " : "NG  ") + (shared && !mine ? shared : shared && ev.command.startsWith("ln_end,") ? shared : label) + (ev.ok ? "" : " … " + tr(ev.error)), ev.ok ? "ok" : "err");
 		if (mine && !ev.ok && !ev.command.startsWith("rt_def") && !ev.command.startsWith("rt_path")) toast(tr(ev.error));
 	}
 	else if (ev.type === "route") {

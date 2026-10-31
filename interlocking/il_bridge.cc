@@ -644,6 +644,9 @@ static void handle_http(client_t &c, char *head, const char *body)
 	else if(  strcmp(target, "/api/panel") == 0  ) {
 		il->get_panel_json(json, (uint16)get_query_int(query, "id", 0));
 	}
+	else if(  strcmp(target, "/api/line") == 0  ) {
+		il->get_line_json(json, (uint16)get_query_int(query, "id", 0));
+	}
 	else if(  strcmp(target, "/api/halts") == 0  ) {
 		il_query::get_halts_json(json);
 	}

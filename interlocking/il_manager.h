@@ -191,6 +191,19 @@ struct il_station_t {
 	il_point_t *find_point(koord3d pos) const;
 };
 
+/// a line panel (路線盤): a drawing of a whole line for the view of all trains (全区間在線), not of a station.
+/// Parts as on a custom panel: T track, W train number window, B number box on a platform track, H platform of a
+/// small station, N station name, L text, F frame, C clock, Y style
+struct il_line_t {
+	uint16 id;
+	plainstring name;   ///< encoded by the panel
+	vector_tpl<il_part_t *> parts;
+	uint32 rev;         ///< changes with every change of the parts (not saved)
+	uint8 edit_player;  ///< company editing it now, 255 = nobody (not saved)
+	il_line_t() : id(0), rev(0), edit_player(255) {}
+	~il_line_t() { clear_ptr_vector(parts); }
+};
+
 /**
  * Holds all interlocking definitions and states.
  *
@@ -232,6 +245,8 @@ public:
 	void get_status_json(cbuffer_t &buf) const;
 	/// the custom panel of a station
 	void get_panel_json(cbuffer_t &buf, uint16 station) const;
+	/// a line panel (路線盤)
+	void get_line_json(cbuffer_t &buf, uint16 line) const;
 
 	/// all rail signals in the rectangle as one JSON object
 	void get_signals_json(cbuffer_t &buf, koord p1, koord p2) const;
@@ -245,7 +260,7 @@ public:
 	const il_route_t *get_route(uint16 id) const;
 
 private:
-	interlocking_manager_t() : next_id(1), last_wrong_route(0), stage_station(0) {}
+	interlocking_manager_t() : next_id(1), last_wrong_route(0), stage_station(0), line_stage_id(0) {}
 	~interlocking_manager_t() { reset(); }
 
 	vector_tpl<il_station_t *> stations;
@@ -271,6 +286,13 @@ private:
 	/// custom panel being uploaded in parts (cp_begin, cp_add ..., cp_end), not saved
 	vector_tpl<il_part_t *> stage;
 	uint16 stage_station;
+	/// line panels, and one being uploaded in parts (ln_begin, ln_add ..., ln_end)
+	vector_tpl<il_line_t *> lines;
+	vector_tpl<il_part_t *> line_stage;
+	uint16 line_stage_id;
+	il_line_t *find_line(uint16 id) const;
+	/// the commands of line panels (ln_*): open to everybody, like the shared diagram
+	const char *execute_line(const char *cmd, char **f, uint32 n, const player_t *player);
 
 
 	il_station_t *find_station(uint16 id) const;
@@ -326,7 +348,7 @@ private:
 	/// a magnet "out of use" (使用停止) lies on this tile (of any station)
 	const il_mark_t *stop_mark_at(koord3d pos) const;
 	/// parts of a custom panel as sent by the panel (cp_add)
-	const char *parse_parts(const char *s, vector_tpl<il_part_t *> &out) const;
+	const char *parse_parts(const char *s, vector_tpl<il_part_t *> &out, const char *types = "TSPDHLAFCKY") const;
 	il_route_t *new_route(il_station_t *st, const vector_tpl<koord3d> &tiles, const char *name, bool temp);
 	/// route from a tile list made on the panel (start lever + destination button)
 	/// extra: with the shunting / calling-on lever of the start (electronic panel; a relay panel knows it from the turned lever)

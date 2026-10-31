@@ -429,9 +429,10 @@ function renderNetwork() {
 	clock.textContent = connected && network ? network.time : "";
 	if (!connected || networkError || !network || !networkSeed.startsWith(stationId + ":")) {
 		summary.textContent = !connected ? "ゲームに接続できません。在線情報は更新されていません。" : networkError || "在線情報を取得中…";
-		list.innerHTML = ""; renderNetworkMap(null); return;
+		list.innerHTML = ""; renderNetworkMap(null); renderLine(null); return;
 	}
 	renderNetworkMap(network);
+	renderLine(network);
 	const diagram = operationData?.diagrams[operationConfig.diagram];
 	summary.textContent = `接続線路 ${network.track_count} タイル・在線 ${network.convoys.length} 編成` + (diagram ? ` ／ ${diagram.name}` : operationData ? " ／ ダイヤ未選択（在線表示のみ）" : " ／ ダイヤ未読込（在線表示のみ）");
 	list.innerHTML = network.convoys.map(c => {
@@ -510,7 +511,7 @@ function renderNetworkMap(data) {
 
 for (const [id, factor] of [["networkZoomIn", 1.5], ["networkZoomOut", 1 / 1.5], ["networkFit", 0]]) document.getElementById(id).addEventListener("click", () => {
 	networkMapZoom = factor ? Math.max(1, Math.min(128, networkMapZoom * factor)) : 1;
-	if (network) renderNetworkMap(network);
+	if (network) { renderNetworkMap(network); renderLine(network); }
 });
 
 document.getElementById("panelMode").addEventListener("change", e => {
