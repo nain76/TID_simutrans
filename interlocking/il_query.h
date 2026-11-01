@@ -15,7 +15,8 @@ namespace il_query {
 	/// all rail tiles in the rectangle with ribi, halt, depot, signal and reservation
 	void get_tracks_json(cbuffer_t &buf, koord p1, koord p2);
 	/// Physical railway occupancy on every track connected to the seed station.
-	void get_network_json(cbuffer_t &buf, koord3d seed);
+	/// with_tiles false: the trains only, and tiles_sig (changes when the tracks change) to know when to ask again
+	void get_network_json(cbuffer_t &buf, koord3d seed, bool with_tiles = true);
 
 	/// all stations that have railway platforms, with their platform tiles
 	void get_halts_json(cbuffer_t &buf);

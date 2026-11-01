@@ -332,7 +332,7 @@ function networkTrainDisplay(c, data) {
 let operationData = null;
 let sharedOperations = null, operationsLoading = null, operationsBusy = false;
 const operationMaxBytes = 8 * 1024 * 1024;
-let network = null, networkSeed = "", networkError = "", networkDue = 0;
+let network = null, networkSeed = "", networkError = "", networkDue = 0, networkTilesOf = "";
 let networkMapZoom = 1;
 let networkMapRendered = null;
 const operationConfig = { early: 120, late: 1800, diagram: -1, stationAliases: [] };
@@ -415,9 +415,19 @@ async function refreshNetwork() {
 	if (!p) { networkError = "設定で対応する駅を選択してください"; return; }
 	if (performance.now() < networkDue) return;
 	networkDue = performance.now() + 2000;
+	// a line panel shown (not edited): the trains only; the tiles again when the tracks changed (tiles_sig).
+	// The map of the game shows the aspects of the signals: it takes the tiles every time
+	const kept = network && network.tiles && !network.stale && networkTilesOf === seed ? network : null;
+	const trainsOnly = !!(kept && typeof shownLine === "function" && shownLine() && !lnEdit);
 	try {
-		const result = await api(`/api/network?x=${p[0]}&y=${p[1]}&z=${p[2]}`);
+		const result = await api(`/api/network?x=${p[0]}&y=${p[1]}&z=${p[2]}` + (trainsOnly ? "&tiles=0" : ""));
 		if (!isNetworkMode() || networkSeed !== seed) return;
+		if (!result.tiles) {
+			if (result.tiles_sig !== kept.tiles_sig) { networkDue = 0; result.tiles = kept.tiles; result.stale = true; }
+			else result.tiles = kept.tiles;
+			result.tiles_sig = kept.tiles_sig;
+		}
+		networkTilesOf = seed;
 		network = result; networkError = "";
 	} catch (e) { network = null; networkError = "在線情報を取得できません（対応するゲーム本体が必要です）"; }
 }
@@ -431,7 +441,8 @@ function renderNetwork() {
 		summary.textContent = !connected ? "ゲームに接続できません。在線情報は更新されていません。" : networkError || "在線情報を取得中…";
 		list.innerHTML = ""; renderNetworkMap(null); renderLine(null); return;
 	}
-	renderNetworkMap(network);
+	// the map of the game only while it is shown (it is the heavy one to draw)
+	if (!(typeof shownLine === "function" && (shownLine() || lnEdit))) renderNetworkMap(network);
 	renderLine(network);
 	const diagram = operationData?.diagrams[operationConfig.diagram];
 	summary.textContent = `接続線路 ${network.track_count} タイル・在線 ${network.convoys.length} 編成` + (diagram ? ` ／ ${diagram.name}` : operationData ? " ／ ダイヤ未選択（在線表示のみ）" : " ／ ダイヤ未読込（在線表示のみ）");

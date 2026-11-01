@@ -9,7 +9,7 @@ const context = vm.createContext({ console, localStorage: { getItem: () => null,
 	document: { getElementById: () => ({ addEventListener() {} }), addEventListener() {} } });
 const run = (code) => vm.runInContext(code, context);
 run(`const N = 1, E = 2, S = 4, W = 8, DIRS = [N, E, S, W], DXY = { 1: [0, -1], 2: [1, 0], 4: [0, 1], 8: [-1, 0] }, BACK = { 1: 4, 2: 8, 4: 1, 8: 2 };
-	const localStore = () => null; let networkMapZoom = 1, network = null, status = { lines: [] };`);
+	const localStore = () => null; let networkMapZoom = 1, network = null, status = { lines: [], routes: [] };`);
 run(fs.readFileSync(new URL("../panel/line.js", import.meta.url), "utf8"));
 
 // the network: tiles { p, r, halt, s }
@@ -68,6 +68,31 @@ assert.ok(of("T").some(p => p.x1 === p.x2 && Math.abs(p.y2 - p.y1) > 2), "the br
 assert.equal(of("C").length, 1, "a clock");
 assert.ok(parts.every(p => p.x1 >= 0 && p.y1 >= 0 && p.x2 >= 0 && p.y2 >= 0), "all on the panel");
 
+// 5. what moves: blocks between signals, train numbers in windows / boxes, routes
+const train = (id, tiles, dir, name) => ({ id, name, pos: tiles[0], dir, occupied: tiles });
+const run2 = (expr) => JSON.parse(run(`JSON.stringify(${expr})`));
+context.moving = Object.assign({}, data, { seconds: 0, convoys: [
+	train(1, [[70, 20, 0], [69, 20, 0]], 2, "東行き"),          // upper track, between the signals at 60 and 120, going east
+	train(2, [[100, 22, 0], [101, 22, 0]], 8, "西行き"),        // lower track, going west
+	train(3, [[160, 22, 0], [159, 22, 0]], 2, "大駅停車"),      // at the station
+	train(4, [[200, 20, 0], [199, 20, 0]], 8, "逆走"),          // upper track going west: no window shows that way
+] });
+context.parts = parts;
+context.label = (c) => ({ number: c.name, minutes: c.id === 2 ? 3 : 0 });
+const places = run2("[...lineTrainPlaces(parts, moving, label)].map(([i, l]) => [parts[i].t, parts[i].f, l.number, l.minutes, parts[i].b.map(t => t.join(','))])");
+const placed = (n) => places.find(p => p[2] === n);
+assert.ok(placed("東行き") && placed("東行き")[0] === "W" && placed("東行き")[1] === 2 && placed("東行き")[4].includes("61,20,0"), `the eastbound train in the window of its block (${JSON.stringify(placed("東行き"))})`);
+assert.ok(placed("西行き") && placed("西行き")[0] === "W" && placed("西行き")[1] === 8 && placed("西行き")[3] === 3, "the westbound train in the window below, with its delay");
+assert.ok(placed("大駅停車") && placed("大駅停車")[0] === "B" && placed("大駅停車")[4].includes("160,22,0"), "the train at the station in the number box of its track");
+assert.ok(!placed("逆走") || placed("逆走")[1] === 0, "a train going the other way: not in the windows of the eastbound track (a single track window, both ways, may show it)");
+const red = run2("[...lineOccupied(parts, moving)].map(i => parts[i].b.map(t => t.join(',')))");
+assert.ok(red.some(b => b.includes("90,20,0")) && red.some(b => b.includes("61,20,0")), "the whole block of the eastbound train is red (60 to 120)");
+assert.ok(!red.some(b => b.includes("50,20,0")), "the block behind the signal at 60 is not red");
+run("status.routes = [{ state: 'set', tiles: [[152, 24, 0], [153, 24, 0], [154, 24, 0], [155, 24, 0]] }, { state: 'idle', tiles: [[10, 20, 0], [11, 20, 0]] }]");
+const spans = run2("lineRouteSpans(parts)");
+const third = of("T").find(p => p.b.some(t => t.join(",") === "153,24,0"));
+assert.ok(spans.length >= 1 && spans.every(sp => sp[1] === third.y1 && sp[3] === third.y1), "a set route drawn on the line(s) of the third track, an idle one not");
+
 if (process.argv[2]) {
 	// the draft drawn roughly, to look at
 	const S = 10, mx = Math.max(...parts.flatMap(p => [p.x1, p.x2])) + 20, my = Math.max(...parts.flatMap(p => [p.y1, p.y2])) + 6;
@@ -81,4 +106,4 @@ if (process.argv[2]) {
 	}
 	fs.writeFileSync(process.argv[2], out.join("") + "</svg>");
 }
-console.log(`PASS: line panel draft: shortened, stations (boxes / platform marks / names), windows by side and direction, branch, clock (${parts.length} parts)`);
+console.log(`PASS: line panel draft: shortened, stations (boxes / platform marks / names), windows by side and direction, branch, clock; blocks, train numbers in windows / boxes by direction, routes (${parts.length} parts)`);

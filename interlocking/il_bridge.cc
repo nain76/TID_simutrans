@@ -657,7 +657,7 @@ static void handle_http(client_t &c, char *head, const char *body)
 	}
 	else if(  strcmp(target, "/api/network") == 0  ) {
 		il_query::get_network_json(json, koord3d((sint16)get_query_int(query, "x", -1),
-			(sint16)get_query_int(query, "y", -1), (sint8)get_query_int(query, "z", -128)));
+			(sint16)get_query_int(query, "y", -1), (sint8)get_query_int(query, "z", -128)), get_query_int(query, "tiles", 1) != 0);
 	}
 	else if(  strcmp(target, "/api/info") == 0  ) {
 		karte_t *welt = world();

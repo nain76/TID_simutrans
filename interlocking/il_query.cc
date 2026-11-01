@@ -204,7 +204,7 @@ static bool panel_ticks_until_arrival(const convoi_t *cnv, uint32 &ticks)
 }
 
 
-void il_query::get_network_json(cbuffer_t &buf, koord3d seed)
+void il_query::get_network_json(cbuffer_t &buf, koord3d seed, bool with_tiles)
 {
 	karte_t *welt = world();
 	vector_tpl<grund_t *> todo;
@@ -240,9 +240,20 @@ void il_query::get_network_json(cbuffer_t &buf, koord3d seed)
 			}
 		}
 	}
+	// a mark of the tracks as they are (tiles, their directions, stops and signals, not the aspects): a panel that
+	// asked for the trains only asks for the tiles again when it changes
+	uint32 sig = 2166136261u;
+	const auto mix = [&](uint32 v) { sig = (sig ^ v) * 16777619u; };
+	for(  uint32 i = 0; i < todo.get_count(); i++  ) {
+		const koord3d p = todo[i]->get_pos();
+		mix((uint16)p.x); mix((uint16)p.y); mix((uint8)p.z); mix(ways[i]->get_ribi_unmasked());
+		mix(todo[i]->get_halt().is_bound() ? 1 : 0);
+		const signal_t *s = todo[i]->find<signal_t>();
+		mix(s ? s->get_dir() : 0);
+	}
 	const uint32 seconds = (uint32)(((uint64)(welt->get_ticks() % welt->ticks_per_world_month) * 86400) / welt->ticks_per_world_month);
-	buf.printf("{\"type\":\"network\",\"time\":\"%02u:%02u:%02u\",\"seconds\":%u,\"track_count\":%u,\"convoys\":[",
-		seconds / 3600, seconds / 60 % 60, seconds % 60, seconds, (uint32)grounds.size());
+	buf.printf("{\"type\":\"network\",\"time\":\"%02u:%02u:%02u\",\"seconds\":%u,\"track_count\":%u,\"tiles_sig\":%u,\"convoys\":[",
+		seconds / 3600, seconds / 60 % 60, seconds % 60, seconds, (uint32)grounds.size(), sig);
 	bool first = true;
 	FOR(vector_tpl<convoihandle_t>, const c, welt->convoys()) {
 		if(  !c.is_bound() || c->in_depot() || !c->get_vehicle_count() || c->front()->get_waytype() != track_wt  ) continue;
@@ -258,6 +269,8 @@ void il_query::get_network_json(cbuffer_t &buf, koord3d seed)
 		first = false;
 		append_json_string(buf, c->get_name());
 		buf.append(",\"pos\":"); append_json_pos(buf, c->get_pos());
+		// the direction the head of the train goes (for the train number windows of a line panel)
+		buf.printf(",\"dir\":%u", (unsigned)c->front()->get_direction());
 		const grund_t *g = welt->lookup(occupied[0]);
 		buf.append(",\"halt\":");
 		append_json_string(buf, g && g->get_halt().is_bound() ? g->get_halt()->get_name() : "");
@@ -313,6 +326,10 @@ void il_query::get_network_json(cbuffer_t &buf, koord3d seed)
 			append_json_pos(buf, occupied[i]);
 		}
 		buf.append("]}");
+	}
+	if(  !with_tiles  ) {
+		buf.append("]}");
+		return;
 	}
 	buf.append("],\"tiles\":[");
 	for(  uint32 i = 0; i < todo.get_count(); i++  ) {

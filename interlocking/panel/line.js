@@ -139,6 +139,17 @@ function makeLineDraft(data) {
 	const boxes = [];   // rectangles taken (windows must not cover them)
 	const take = (r) => boxes.push(r);
 	const free = (r) => !boxes.some(b => r.x1 < b.x2 + 1 && r.x2 > b.x1 - 1 && r.y1 < b.y2 + 1 && r.y2 > b.y1 - 1);
+	// a station name: above its station, moved further up (then down) where another name or box is in the way
+	const placeName = (name, cxm, y, small) => {
+		const half = (name.length * (small ? .75 : 1.1) + 1) / 2;
+		const at = (yy) => ({ x1: cxm - half, x2: cxm + half, y1: yy - 1.5, y2: yy + 1.5 });
+		// nor on a track
+		const onTrack = (r) => parts.some(q => q.t === "T" && Math.min(q.x1, q.x2) <= r.x2 && Math.max(q.x1, q.x2) >= r.x1 && Math.min(q.y1, q.y2) <= r.y2 && Math.max(q.y1, q.y2) >= r.y1);
+		const tries = [0, -3, -6, -9, -12, -15, -18, -21, 3, 6, 9, 12].map(d => y + d);
+		const yy = tries.find(v => free(at(v)) && !onTrack(at(v))) ?? tries.find(v => free(at(v))) ?? y;
+		parts.push({ t: "N", x1: cxm, y1: yy, x2: cxm, y2: yy, b: [], s: encodeURIComponent(name), f: small ? 1 : 0 });
+		take(at(yy));
+	};
 	for (const [name, ts] of stops) {
 		const tracks = [], done = new Set();
 		for (const t of ts) {
@@ -168,16 +179,15 @@ function makeLineDraft(data) {
 				take({ x1: box.x1, x2: box.x2, y1: below ? box.y1 : box.y1 - 3, y2: below ? box.y2 + 3 : box.y2 });
 			}
 			const cxm = Math.round((sx1 + sx2) / 2);
-			parts.push({ t: "N", x1: cxm, y1: sy1 - 5, x2: cxm, y2: sy1 - 5, b: [], s: encodeURIComponent(name), f: 0 });
-			take({ x1: cxm - 4, x2: cxm + 4, y1: sy1 - 7, y2: sy1 - 4 });
+			placeName(name, cxm, sy1 - 5, false);
 		}
 		else {
 			// between its tracks (or beside the one track): the platform, the name above
 			const h = sy1 === sy2 ? { x1: sx1 - 1, y1: sy1 - 2, x2: Math.max(sx2 + 1, sx1 + 2), y2: sy1 - 1 } : { x1: sx1 - 1, y1: Math.round(mid) - 1, x2: Math.max(sx2 + 1, sx1 + 2), y2: Math.round(mid) + 1 };
 			parts.push(Object.assign({ t: "H", b: ts.map(t => t.p), s: encodeURIComponent(name), f: 0 }, h));
 			const cxm = Math.round((sx1 + sx2) / 2);
-			parts.push({ t: "N", x1: cxm, y1: sy1 - 3, x2: cxm, y2: sy1 - 3, b: [], s: encodeURIComponent(name), f: 1 });
-			take({ x1: h.x1, x2: h.x2, y1: sy1 - 4, y2: h.y2 });
+			take(h);
+			placeName(name, cxm, sy1 - 3, true);
 		}
 	}
 	// 4. train number windows: on the long straight lines between stations, above an upper track, below a
@@ -195,8 +205,15 @@ function makeLineDraft(data) {
 		if (!free(r)) continue;
 		take(r);
 		const sig = p.b.map(q => tiles.get(q[0] + "," + q[1])?.s).find(s => s && [N, E, S, W].includes(s.dir));
-		parts.push(Object.assign({ t: "W", b: p.b, s: "", f: sig ? sig.dir : 0 }, r));
+		parts.push(Object.assign({ t: "W", b: p.b, s: "", f: sig ? sig.dir : 0, ty: y }, r));
 	}
+	// a window on a line without a signal: the direction of the nearest window on the same track
+	const wins = parts.filter(p => p.t === "W");
+	for (const w of wins) if (!w.f) {
+		const near = wins.filter(o => o.f && o.ty === w.ty).sort((a, b) => Math.abs(a.x1 - w.x1) - Math.abs(b.x1 - w.x1))[0];
+		if (near) w.f = near.f;
+	}
+	for (const w of wins) delete w.ty;
 	// 5. the clock at the top left; everything starts at (2,2)
 	const placed = parts.slice();
 	const minX = Math.min(...placed.flatMap(p => [p.x1, p.x2])), minY = Math.min(...placed.flatMap(p => [p.y1, p.y2]));
@@ -204,6 +221,87 @@ function makeLineDraft(data) {
 	const ox = 2 - Math.min(...parts.flatMap(p => [p.x1, p.x2])) + 5, oy = 2 - Math.min(...parts.flatMap(p => [p.y1, p.y2])) + 2;
 	for (const p of parts) { p.x1 += ox; p.x2 += ox; p.y1 += oy; p.y2 += oy; }
 	return parts;
+}
+
+// ---------------------------------------------------------------------------
+// what moves on a line panel: occupied blocks, train numbers, routes
+// ---------------------------------------------------------------------------
+const key3 = (p) => p[0] + "," + p[1] + "," + p[2];
+// blocks: the track divided at the signals (a signal tile is a block of its own). Worked out once per set of tiles
+let lineBlockCache = null;   // { tiles, map: "x,y,z" -> block }
+function lineBlocks(tiles) {
+	if (lineBlockCache && lineBlockCache.tiles === tiles) return lineBlockCache.map;
+	const byXY = new Map();
+	for (const t of tiles) { const k = t.p[0] + "," + t.p[1]; if (!byXY.has(k)) byXY.set(k, []); byXY.get(k).push(t); }
+	const up = new Map(tiles.map(t => [key3(t.p), key3(t.p)]));
+	const find = (k) => { while (up.get(k) !== k) { up.set(k, up.get(up.get(k))); k = up.get(k); } return k; };
+	for (const t of tiles) {
+		if (t.s) continue;
+		for (const d of DIRS) {
+			if (!(t.r & d)) continue;
+			// the next tile (one level up or down on a slope)
+			const n = (byXY.get((t.p[0] + DXY[d][0]) + "," + (t.p[1] + DXY[d][1])) || []).find(o => (o.r & BACK[d]) && Math.abs(o.p[2] - t.p[2]) <= 1);
+			if (n && !n.s) up.set(find(key3(t.p)), find(key3(n.p)));
+		}
+	}
+	const map = new Map();
+	for (const t of tiles) map.set(key3(t.p), find(key3(t.p)));
+	lineBlockCache = { tiles, map };
+	return map;
+}
+// the blocks a line (or a window bound to a line) stands for: those of its tiles inside (its ends are junctions,
+// signals or the edge of a station, which belong to the next line as well)
+const innerTiles = (p) => (p.b || []).length > 2 ? p.b.slice(1, -1) : (p.b || []);
+// train number (as matched with the diagram, else the operation number of the game) and delay in whole minutes
+function lineTrainLabel(c, data) {
+	const diagram = operationData?.diagrams[operationConfig.diagram];
+	const matches = diagram ? matchOperation(c.name, data.seconds, diagram, operationConfig.early, operationConfig.late, c.halt, c) : [];
+	const one = matches.length === 1 ? matches[0] : null;
+	const delay = trainDelay(c, data.seconds, one);
+	return { number: (one && one.number) || operationNumber(c.name), minutes: delay.seconds >= 60 ? Math.floor(delay.seconds / 60) : 0 };
+}
+// where each train is shown: the number box of the platform it stands at, else the window of its block that
+// shows its direction. part index -> label
+function lineTrainPlaces(parts, data, label = lineTrainLabel) {
+	const places = new Map();
+	if (!data?.convoys?.length || !data.tiles) return places;
+	const blocks = lineBlocks(data.tiles);
+	const winBlocks = parts.map(p => p.t === "W" ? new Set(innerTiles(p).map(t => blocks.get(key3(t))).filter(Boolean)) : null);
+	const boxTiles = parts.map(p => p.t === "B" ? new Set((p.b || []).map(key3)) : null);
+	for (const c of data.convoys) {
+		const occ = [key3(c.pos)].concat(c.occupied.map(key3).filter(k => k !== key3(c.pos)));
+		let at = -1;
+		for (const k of occ) { at = boxTiles.findIndex((b, i) => b && b.has(k) && !places.has(i)); if (at >= 0) break; }
+		if (at < 0) for (const k of occ) {
+			const bk = blocks.get(k);
+			at = winBlocks.findIndex((b, i) => b && b.has(bk) && !places.has(i) && (!parts[i].f || (parts[i].f & c.dir)));
+			if (at >= 0) break;
+		}
+		if (at >= 0) places.set(at, label(c, data));
+	}
+	return places;
+}
+// lines red where a block of theirs has a train; the parts of lines that routes of the panel take
+function lineOccupied(parts, data) {
+	const red = new Set();
+	if (!data?.tiles) return red;
+	const blocks = lineBlocks(data.tiles);
+	const taken = new Set((data.convoys || []).flatMap(c => c.occupied.map(p => blocks.get(key3(p)))));
+	parts.forEach((p, i) => { if (p.t === "T" && innerTiles(p).some(t => taken.has(blocks.get(key3(t))))) red.add(i); });
+	return red;
+}
+function lineRouteSpans(parts) {
+	const tiles = new Set((status.routes || []).filter(r => r.state !== "idle").flatMap(r => r.tiles.map(key3)));
+	const spans = [];
+	if (!tiles.size) return spans;
+	for (const p of parts) {
+		if (p.t !== "T" || !p.b?.length) continue;
+		const idx = p.b.map((t, i) => tiles.has(key3(t)) ? i : -1).filter(i => i >= 0);
+		if (idx.length < 2 && !(idx.length === 1 && p.b.length === 1)) continue;
+		const n = Math.max(1, p.b.length - 1), f1 = idx[0] / n, f2 = idx[idx.length - 1] / n;
+		spans.push([p.x1 + (p.x2 - p.x1) * f1, p.y1 + (p.y2 - p.y1) * f1, p.x1 + (p.x2 - p.x1) * f2, p.y1 + (p.y2 - p.y1) * f2]);
+	}
+	return spans;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +331,13 @@ function renderLineMap(svg, wrap, parts, data) {
 		const dots = el("g", { "pointer-events": "none" }, svg);
 		for (let x = 0; x <= GW; x += 2) for (let y = 0; y <= GH; y += 2) el("circle", { cx: X(x), cy: Y(y), r: 1, fill: "#5f86ff" }, dots);
 	}
-	const occupied = new Set((data?.convoys || []).flatMap(c => c.occupied.map(p => p.join(","))));
+	const redLines = lnEdit ? new Set() : lineOccupied(parts, data);
+	const places = lnEdit ? new Map() : lineTrainPlaces(parts, data);
+	// a number written in a box: as large as fits
+	const digits = (grp, text, x, y, w, h, color) => {
+		const fs = Math.max(6, Math.min(h * .8, w / Math.max(2, String(text).length * .62)));
+		el("text", { x, y: y + h / 2, "font-size": fs, "font-family": "'DejaVu Sans Mono', Consolas, monospace", "font-weight": 700, fill: color, "text-anchor": "middle", "dominant-baseline": "central" }, grp).textContent = text;
+	};
 	const order = { F: 0, H: 1, T: 2, W: 3, B: 4, N: 5, L: 5, C: 5, Y: -1 };
 	const idx = parts.map((p, i) => i).sort((a, b) => (order[parts[a].t] ?? 5) - (order[parts[b].t] ?? 5));
 	const rect = (p) => ({ x: X(Math.min(p.x1, p.x2)), y: Y(Math.min(p.y1, p.y2)), width: Math.max(2, Math.abs(X(p.x2 - p.x1))), height: Math.max(2, Math.abs(Y(p.y2 - p.y1))) });
@@ -242,7 +346,7 @@ function renderLineMap(svg, wrap, parts, data) {
 		if (p.t === "Y") continue;
 		const grp = el("g", { class: (lnEdit ? "lnpart" : "") + (lnEdit && lnEdit.sel === i ? " sel" : ""), "data-lnpart": i }, svg);
 		if (p.t === "T") {
-			const red = (p.b || []).some(t => occupied.has(t.join(",")));
+			const red = redLines.has(i);
 			const color = red ? "#ff3b30" : "#eef3ff";
 			el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: color, "stroke-width": Math.max(2, G * .32), "stroke-linecap": "square" }, grp);
 			// the small marks across the track, as on the TID
@@ -252,14 +356,25 @@ function renderLineMap(svg, wrap, parts, data) {
 		else if (p.t === "W" || p.t === "B") {
 			const r = rect(p);
 			el("rect", Object.assign({ fill: "#0b2c99", stroke: "#5d82ff", "stroke-width": 1.2 }, r), grp);
+			const train = places.get(i);
 			if (p.t === "W") {
 				// the train number and, at the right, the delay in minutes
 				const dx = r.x + r.width - Math.min(r.width / 3, G * 1.6);
 				el("line", { x1: dx, y1: r.y, x2: dx, y2: r.y + r.height, stroke: "#5d82ff", "stroke-width": 1 }, grp);
+				if (train) {
+					grp.setAttribute("class", (grp.getAttribute("class") || "") + " train");
+					digits(grp, train.number, r.x + (dx - r.x) / 2, r.y, dx - r.x - 2, r.height, "#ffb31a");
+					if (train.minutes) digits(grp, train.minutes, dx + (r.x + r.width - dx) / 2, r.y, r.x + r.width - dx - 2, r.height, "#ff4040");
+				}
 			}
 			else {
-				const s = G * 1.6, cxm = r.x + r.width / 2;
-				el("rect", { x: cxm - s / 2, y: p.f & 1 ? r.y + r.height + G * .6 : r.y - G * .6 - s, width: s, height: s, fill: "#0b2c99", stroke: "#5d82ff", "stroke-width": 1.2 }, grp);
+				const s = G * 1.6, cxm = r.x + r.width / 2, sy = p.f & 1 ? r.y + r.height + G * .6 : r.y - G * .6 - s;
+				el("rect", { x: cxm - s / 2, y: sy, width: s, height: s, fill: "#0b2c99", stroke: "#5d82ff", "stroke-width": 1.2 }, grp);
+				if (train) {
+					grp.setAttribute("class", (grp.getAttribute("class") || "") + " train");
+					digits(grp, train.number, cxm, r.y, r.width - 4, r.height, "#ffb31a");
+					if (train.minutes) digits(grp, train.minutes, cxm, sy, s - 2, s, "#ff4040");
+				}
 			}
 		}
 		else if (p.t === "H") el("rect", Object.assign({ fill: "#38c8ff" }, rect(p)), grp).appendChild(el("title", {})).textContent = lineText(p);
@@ -279,6 +394,9 @@ function renderLineMap(svg, wrap, parts, data) {
 		else if (p.t === "F") el("rect", Object.assign({ fill: "none", stroke: "#9db4ff", "stroke-width": 1.2, "stroke-dasharray": "6 4" }, rect(p)), grp);
 		else if (p.t === "C") el("text", { x: X(p.x1), y: Y(p.y1), "font-size": Math.max(9, G * 1.3), fill: "#ffffff", "font-family": "monospace", "text-anchor": "middle", "dominant-baseline": "middle" }, grp).textContent = data?.time || clockOf(status).hms;
 	}
+	// routes set on the panels of the stations
+	if (!lnEdit) for (const [ax, ay, bx, by] of lineRouteSpans(parts))
+		el("line", { x1: X(ax), y1: Y(ay), x2: X(bx), y2: Y(by), stroke: "#ff3b30", "stroke-width": Math.max(2, G * .32), "stroke-linecap": "square", class: "lnroute", "pointer-events": "none" }, svg);
 	if (lnEdit && parts[lnEdit.sel] && "TWBHF".includes(parts[lnEdit.sel].t)) {
 		const p = parts[lnEdit.sel];
 		for (const [x, y, h] of [[p.x1, p.y1, 1], [p.x2, p.y2, 2]]) el("rect", { x: X(x) - 5, y: Y(y) - 5, width: 10, height: 10, fill: "#ffe066", stroke: "#000", class: "lnhandle", "data-h": h }, svg);
@@ -291,6 +409,8 @@ function renderLineMap(svg, wrap, parts, data) {
 	else svg.onmousedown = svg.onmousemove = svg.onmouseup = svg.ondblclick = null;
 }
 
+// the parts drawn now (for tests and tools)
+function lnPartsShown() { return lnEdit ? lnEdit.parts : lineParts(shownLine()) || []; }
 // the line panel or the map, and the bar above them; called from renderNetwork()
 function renderLine(data) {
 	const bar = document.getElementById("lineBar"), wrap = document.getElementById("lineWrap"), mapWrap = document.getElementById("networkMapWrap");
