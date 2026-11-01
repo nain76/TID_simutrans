@@ -1,7 +1,7 @@
 // Web panel: line panels (路線盤) in the view of all trains (全区間在線), scenario il-via
 //   1. a line panel made from a draft of the tracks: lines, a station, train number windows, the clock
 //   2. applied: in the game, shown to a second browser (drawn in blue)
-//   3. edited: a part moved and applied; renamed; deleted
+//   3. edited: a part moved and applied; colour rules; renamed; deleted
 //
 //   node interlocking/tests/panel_line_test.mjs <sim binary> <workdir> <screenshot dir>
 import { spawn } from "node:child_process";
@@ -85,6 +85,16 @@ try {
 	check(true, "applied: the game keeps the moved part");
 	await page2.waitForFunction(([i, x]) => [...lineCache.values()][0]?.parts[i]?.x1 === x + 2, n, { timeout: 10000 });
 	check(true, "the second browser fetched the new drawing");
+	// colour rules of the train numbers: edited and kept with the line panel
+	await page.click("#lineBar button[data-ln=edit]");
+	await page.waitForFunction(() => !!lnEdit, null, { timeout: 5000 });
+	await page.click("#lineBar button[data-ln=colors]");
+	await page.click("#lnModal [data-x=add]");
+	await page.fill("#lnModal [data-f=v]", "10");
+	await page.click("#lnModal [data-x=ok]");
+	await page.click("#lineBar button[data-ln=apply]");
+	await waitFor(async () => (await line(lid)).parts.some(p => p.t === "Y" && JSON.parse(decodeURIComponent(p.s)).rules[0]?.v === "10"), 10000, "rules saved");
+	check(true, "colour rules (10 cars) kept with the line panel");
 	page.once("dialog", d => d.accept("井の頭線"));
 	await page.click("#lineBar button[data-ln=rename]");
 	await waitFor(async () => decodeURIComponent((await st()).lines[0].name) === "井の頭線", 8000, "renamed");

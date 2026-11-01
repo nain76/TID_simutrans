@@ -267,6 +267,10 @@ private:
 	// One dictionary for the whole game, independent of stations and players.
 	vector_tpl<plainstring> alias_game_names;
 	vector_tpl<plainstring> alias_dia_names;
+	/// trains given an operation number / train number by hand, or marked (special train number, red), by the name of
+	/// the train in the game (the number of a convoy differs between the server and the clients of a network game)
+	vector_tpl<plainstring> tag_names, tag_ops, tag_nums;
+	vector_tpl<uint8> tag_flags;
 	il_operations_t operations;
 	vector_tpl<il_route_t *> routes;
 

@@ -320,13 +320,54 @@ function trainDelay(convoy, seconds, entry) {
 
 const isDelayLate = delay => delay.seconds >= 60;
 
-function networkTrainDisplay(c, data) {
+// a train given an operation number / train number by hand, or marked red (special train number): by its name
+function trainTag(name) {
+	const t = (status.train_tags || []).find(x => x[0] === name);
+	return t ? { op: t[1], number: t[2], flags: t[3] } : null;
+}
+// turning round (折り返し): at the end of one train of its operation, where the next one starts, two trains of the
+// operation fit the time. Standing there, it is the next one (its number is shown from the arrival on)
+function pickTurnaround(matches, c) {
+	if (matches.length < 2 || c.loading !== true || !c.halt) return matches;
+	const here = oudStationName(c.halt);
+	const starting = matches.filter(e => e.stops[e.from]?.name === here);
+	const ending = matches.filter(e => e.stops[e.to]?.name === here);
+	return starting.length === 1 && ending.length >= 1 && starting.length + ending.length === matches.length ? starting : matches;
+}
+// which train of the diagram a train of the game is: operation number (of its name, or given by hand), time and
+// stations, turning round; the train number given by hand wins (its train of the diagram, if it has one, gives the delay)
+function identifyTrain(c, data) {
 	const diagram = operationData?.diagrams[operationConfig.diagram];
-	const matches = matchOperation(c.name, data.seconds, diagram, operationConfig.early, operationConfig.late, c.halt, c);
+	const tag = trainTag(c.name);
+	const name = tag?.op || c.name;
+	let matches = diagram ? pickTurnaround(matchOperation(name, data.seconds, diagram, operationConfig.early, operationConfig.late, c.halt, c), c) : [];
+	// standing where a train of its operation ends (arrived, maybe long before the next one is due): the next train of
+	// the operation that starts here
+	if (diagram && c.loading === true && c.halt && !(matches.length === 1 && matches[0].stops[matches[0].from]?.name === oudStationName(c.halt))) {
+		const here = oudStationName(c.halt);
+		const ended = matchOperation(name, data.seconds, diagram, operationConfig.early, operationConfig.late, c.halt, null).filter(e => e.stops[e.to]?.name === here);
+		if (ended.length === 1) {
+			const after = (e) => ((e.start - ended[0].end) % 86400 + 86400) % 86400;
+			const next = diagram.entries.filter(e => e.operation === ended[0].operation && e.id !== ended[0].id && e.stops[e.from]?.name === here && after(e) < 43200).sort((a, b) => after(a) - after(b))[0];
+			if (next) matches = [next];
+		}
+	}
+	if (tag?.number && diagram && !(matches.length === 1 && matches[0].number === tag.number)) {
+		const byNumber = diagram.entries.filter(e => e.number === tag.number && [-1, 0, 1, 2].some(day => {
+			const now = data.seconds + day * 86400;
+			return now >= e.start - operationConfig.early && now <= e.end + operationConfig.late;
+		}));
+		matches = byNumber.length ? [...new Map(byNumber.map(e => [e.id, e])).values()] : [];
+	}
+	const one = matches.length === 1 ? matches[0] : null;
+	return { diagram, tag, matches, one, op: operationNumber(name), number: tag?.number || one?.number || operationNumber(name), red: !!(tag && tag.flags & 1), delay: trainDelay(c, data.seconds, one) };
+}
+
+function networkTrainDisplay(c, data) {
+	const id = identifyTrain(c, data), { diagram, matches } = id;
 	const label = t => `${t.number || "列車番号なし"} ${t.type} ${t.destination}行`;
-	const text = !diagram ? "運用照合なし" : matches.length === 1 ? label(matches[0]) : matches.length ? `候補複数：${matches.map(label).join(" ／ ")}` : "列車未特定";
-	const delay = trainDelay(c, data.seconds, matches.length === 1 ? matches[0] : null);
-	return { text, delay, lines: [`運用 ${operationNumber(c.name)}`, matches.length === 1 ? label(matches[0]) : matches.length ? "候補複数" : diagram ? "列車未特定" : "運用照合なし", delay.text] };
+	const text = id.tag?.number && !id.one ? `${id.tag.number}（手で付けた列番）` : !diagram ? "運用照合なし" : matches.length === 1 ? label(matches[0]) : matches.length ? `候補複数：${matches.map(label).join(" ／ ")}` : "列車未特定";
+	return { text, delay: id.delay, lines: [`運用 ${id.op}`, matches.length === 1 ? label(matches[0]) : matches.length ? "候補複数" : diagram ? "列車未特定" : "運用照合なし", id.delay.text] };
 }
 
 let operationData = null;

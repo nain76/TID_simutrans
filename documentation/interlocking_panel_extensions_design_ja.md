@@ -374,7 +374,7 @@ version 17はカスタム盤の送信途中状態、version 18以降に共有エ
 経由そのものの配列を本体へ別フィールドで保存する方式ではない。
 経由を通る全タイル列を既存の進路データへ保存するため、同期・回転・セーブ・ロードも既存の進路の仕組みを使用する。
 
-## 11. 路線盤（段階1・2）
+## 11. 路線盤（段階1〜3）
 
 全区間在線を TID のように描くための、路線全体の略図。駅のカスタム盤と同じ部品の形式・送り方・保存の仕組みを使う。
 
@@ -409,6 +409,20 @@ version 17はカスタム盤の送信途中状態、version 18以降に共有エ
 | 列番の中身 | ダイヤと一意に照合できた列車番号、なければ `operationNumber()`（列車名）。遅延は `trainDelay()` の秒を 60 で割って切り捨て、1 分以上だけ |
 | 進路 | 状態の進路（`idle` 以外）のマスを、線の上の位置に直して赤で重ねる |
 | 問い合わせ | 路線盤を表示中（編集中でない）は `/api/network?...&tiles=0`。`tiles_sig` が変わったら次は線路ごと取る。ゲームの地図は表示中だけ描く |
+
+描き直しは、表示の中身（部品・在線・列番・色・進路）が変わったときだけ。変わらなければ時計の文字だけを書き換える（クリックが消えない、ブラウザの負担が減る）。
+
+段階3（列車の特定と手での付け直し）:
+
+| 項目 | 内容 |
+|---|---|
+| 特定 | `identifyTrain()`（traffic.js）にまとめ、在線一覧と路線盤の両方で使う |
+| 折り返し | 同じ運用の 2 本が候補に残り、列車がその駅に止まっていて、片方がここで終わり片方がここから出るなら、出る方。候補が尽きても、ここで終わる列車に当たれば、同じ運用でここから出る次の列車（停車が長い場合） |
+| 手での付け直し | 状態の `train_tags`（列車名ごと）。運用番号を付けると、その運用番号で照合する。列番を付けると、それを表示し、同じ列車番号のダイヤの列車が時刻に合えば遅れの計算に使う |
+| 特殊列番 | フラグ 1 の列車は列番を赤（色分けより優先） |
+| 色分け | 路線盤の見た目の部品 Y の文字に `{"rules":[{k,v,c}]}`（URL エンコード）。`k` は cars（両数が `v`）・type・number・op（正規表現 `v`）。上から最初に当てはまった色 `c`、なければ橙 |
+| 詳細 | 列番を押すと開く。両数は `/api/network` の `cars` |
+
 
 
 ## 12. 異常時の扱いと性能上の制約
@@ -445,6 +459,8 @@ HTTP受付のHost検証・POSTの `X-IL-Panel: 1` 必須条件などは[通信�
 | 路線盤の保存・命令 | [line_test.py](../interlocking/tests/line_test.py) | 作成・分けて送る・名前・編集中・拒否・途中で途切れた送信・回転・セーブと読み込み・削除 |
 | 路線盤の下書き | [line_draft_test.mjs](../interlocking/tests/line_draft_test.mjs) | 縮め方、駅（枠／ホーム／駅名）、窓の位置と向き、分岐、時計 |
 | 路線盤の画面 | [panel_line_test.mjs](../interlocking/tests/panel_line_test.mjs) | 下書き・適用・別のブラウザでの表示・編集・名前・削除 |
+| 折り返し・手での付け直し | [panel_traffic_test.mjs](../interlocking/tests/panel_traffic_test.mjs)、[line_test.py](../interlocking/tests/line_test.py) | 終着で次の列車の番号、着いた直後も、運用番号・列番の手での付け直しと赤、保存と読み込み |
+| 詳細・付け直しの画面、色分け | [panel_line_run_test.mjs](../interlocking/tests/panel_line_run_test.mjs)、[panel_line_test.mjs](../interlocking/tests/panel_line_test.mjs)、[line_draft_test.mjs](../interlocking/tests/line_draft_test.mjs) | 詳細が開く、付け直しが赤で出る・元に戻る、色分けの決まりと保存 |
 | 路線盤の動く表示 | [line_draft_test.mjs](../interlocking/tests/line_draft_test.mjs)、[panel_line_run_test.mjs](../interlocking/tests/panel_line_run_test.mjs) | 区間の在線、向きで選ぶ窓、番線枠、進路、列車だけの問い合わせと線路が変わったときの取り直し |
 | 経ボタン（実ゲーム） | [panel_via_test.mjs](../interlocking/tests/panel_via_test.mjs)（シナリオ il-via） | 経由候補の表示、押して経由を選ぶ・外す、経由を通る進路の設定 |
 

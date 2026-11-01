@@ -56,7 +56,7 @@
 // custom panel (カスタム盤): parts of a station, tiles of one part, length of a text
 #define IL_MAX_PARTS 4000
 #define IL_MAX_PART_TILES 512
-#define IL_MAX_PART_TEXT 400
+#define IL_MAX_PART_TEXT 2000
 // magnets and memos of a station
 #define IL_MAX_MARKS 500
 
@@ -89,6 +89,7 @@ void interlocking_manager_t::reset()
 	clear_ptr_vector(line_stage);
 	line_stage_id = 0;
 	alias_game_names.clear(); alias_dia_names.clear();
+	tag_names.clear(); tag_ops.clear(); tag_nums.clear(); tag_flags.clear();
 	operations.reset();
 	stage_station = 0;
 	next_id = 1;
@@ -1019,6 +1020,33 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 			else if(  i < alias_game_names.get_count()  ) alias_dia_names[i] = dia;
 			else if(  alias_game_names.get_count() >= 512  ) error = "bad setting";
 			else { alias_game_names.append(game); alias_dia_names.append(dia); }
+		}
+	}
+	else if(  (strcmp(cmd, "tr_tag") == 0  &&  n == 5)  ||  (strcmp(cmd, "tr_untag") == 0  &&  n == 2)  ) {
+		// a train given an operation number / train number by hand (empty = not given), flags bit 0 = special train
+		// number (red): tr_tag,<name of the train>,<operation number>,<train number>,<flags>; tr_untag,<name>
+		plainstring name, op, num;
+		const bool remove = cmd[3] == 'u';
+		const int flags = remove ? 0 : atoi(f[4]);
+		if(  !decode_alias_name(f[1], name)  ||  (!remove  &&  ((*f[2]  &&  !decode_alias_name(f[2], op))  ||  (*f[3]  &&  !decode_alias_name(f[3], num))  ||  flags < 0  ||  flags > 255))  ) {
+			error = "bad setting";
+		}
+		else {
+			uint32 i = 0;
+			while(  i < tag_names.get_count()  &&  strcmp(tag_names[i].c_str(), name.c_str()) != 0  ) {
+				i++;
+			}
+			if(  i < tag_names.get_count()  ) {
+				tag_names.remove_at(i); tag_ops.remove_at(i); tag_nums.remove_at(i); tag_flags.remove_at(i);
+			}
+			if(  !remove  &&  (op.c_str()  ||  num.c_str()  ||  flags)  ) {
+				if(  tag_names.get_count() >= 1000  ) {
+					error = "bad setting";
+				}
+				else {
+					tag_names.append(name); tag_ops.append(op); tag_nums.append(num); tag_flags.append((uint8)flags);
+				}
+			}
 		}
 	}
 	else if(  strcmp(cmd, "st_newh") == 0  &&  n >= 3  ) {
@@ -3217,8 +3245,8 @@ void interlocking_manager_t::rdwr(loadsave_t *file)
 
 // format of the data block (independent of IL_SAVE_VERSION, which belongs to the old format)
 // 17: custom panel being uploaded, 18: station name aliases, 19: OuDiaSecond diagram
-// 20: directions of signals for both directions, 21: line panels
-#define IL_BLOCK_VERSION 21
+// 20: directions of signals for both directions, 21: line panels, 22: train numbers given by hand
+#define IL_BLOCK_VERSION 22
 // far more than any station needs (a few hundred kilobytes for a large game; a diagram up to 8 MB)
 #define IL_MAX_BLOCK (64u * 1024u * 1024u)
 
@@ -3532,6 +3560,22 @@ void interlocking_manager_t::rdwr_blob(il_blob_t &b)
 		future_fields(b);
 		b.end_section();
 	}
+	if(  version >= 22  ) {
+		// trains given numbers by hand
+		b.begin_section();
+		uint32 nt = tag_names.get_count();
+		b.rdwr_long(nt);
+		for(  uint32 i = 0;  i < nt  &&  i < 1000  &&  !b.broken;  i++  ) {
+			plainstring name = b.loading ? plainstring() : tag_names[i], op = b.loading ? plainstring() : tag_ops[i], num = b.loading ? plainstring() : tag_nums[i];
+			uint8 flags = b.loading ? 0 : tag_flags[i];
+			b.rdwr_str(name); b.rdwr_str(op); b.rdwr_str(num); b.rdwr_byte(flags);
+			if(  b.loading  &&  name.c_str()  ) {
+				tag_names.append(name); tag_ops.append(op); tag_nums.append(num); tag_flags.append(flags);
+			}
+		}
+		future_fields(b);
+		b.end_section();
+	}
 	if(  !b.loading  &&  getenv("TID_IL_TEST_FUTURE")  ) {
 		// a whole section of a later version
 		b.begin_section();
@@ -3728,6 +3772,14 @@ void interlocking_manager_t::get_status_json(cbuffer_t &buf) const
 	for(  uint32 i = 0; i < alias_game_names.get_count(); i++  ) {
 		buf.append(i ? ",[" : "["); append_json_string(buf, alias_game_names[i].c_str());
 		buf.append(","); append_json_string(buf, alias_dia_names[i].c_str()); buf.append("]");
+	}
+	buf.append("],\"train_tags\":[");
+	for(  uint32 i = 0;  i < tag_names.get_count();  i++  ) {
+		buf.append(i ? ",[" : "[");
+		append_json_string(buf, tag_names[i].c_str()); buf.append(",");
+		append_json_string(buf, tag_ops[i].c_str() ? tag_ops[i].c_str() : ""); buf.append(",");
+		append_json_string(buf, tag_nums[i].c_str() ? tag_nums[i].c_str() : "");
+		buf.printf(",%u]", tag_flags[i]);
 	}
 	// line panels (路線盤): the parts are fetched with /api/line when rev changes
 	buf.append("],\"lines\":[");

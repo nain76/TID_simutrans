@@ -167,4 +167,28 @@ for (const work of ["0", "1", "2", "3", "4", "5", "6", "0,5", "3,0", "4,1,0"]) {
 	const t0 = Date.now(); run("parseOudOperations(source)");
 	assert.ok(Date.now() - t0 < 3000, `20,000 falling stop times parsed in ${Date.now() - t0} ms`);
 }
-console.log("PASS: modern and legacy operations, turnarounds, platforms, shunts, coupling/splitting, renumbering, link codes, midnight, conflicts and thresholds");
+// turning round (折り返し) and numbers given by hand (identifyTrain)
+run(`var status = { train_tags: [] };
+	var turn = { name: "turn", entries: [
+		{ id: "K:1", operation: "A01", number: "203", type: "各停", destination: "吉祥寺", start: 36000 - 600, end: 36000, from: 0, to: 1,
+		  stops: [{ name: "富士見", arrival: null, departure: 35400 }, { name: "吉祥寺", arrival: 36000, departure: null }] },
+		{ id: "N:1", operation: "A01", number: "208", type: "各停", destination: "富士見", start: 36300, end: 36900, from: 0, to: 1,
+		  stops: [{ name: "吉祥寺", arrival: null, departure: 36300 }, { name: "富士見", arrival: 36900, departure: null }] },
+		{ id: "N:2", operation: "B02", number: "501", type: "急行", destination: "富士見", start: 36000, end: 36600, from: 0, to: 1,
+		  stops: [{ name: "吉祥寺", arrival: null, departure: 36000 }, { name: "富士見", arrival: 36600, departure: null }] } ] };
+	operationData = { id: "x", diagrams: [turn] }; operationConfig.diagram = 0;`);
+const ident = (c, t) => JSON.parse(run(`JSON.stringify((() => { const r = identifyTrain(${JSON.stringify(c)}, { seconds: ${t} }); return { number: r.number, red: r.red, n: r.matches.length, one: r.one && r.one.number }; })())`));
+const atEnd = { name: "(7) A01", halt: "吉祥寺", loading: true, arrival_elapsed: 60, service_from: "吉祥寺", service_to: "富士見" };
+assert.equal(ident(atEnd, 36120).number, "208", "standing at the end of 203 where 208 starts: 208 (turning round)");
+assert.equal(ident(Object.assign({}, atEnd, { arrival_elapsed: 5 }), 36005).number, "208", "just arrived (long before 208 is due): already 208");
+assert.equal(ident({ name: "(7) A01", halt: "", loading: false, next_halt: "吉祥寺", service_from: "富士見", service_to: "吉祥寺" }, 35800).number, "203", "on the way to the end: still 203");
+run(`status.train_tags = [["(9) Abro", "A01", "", 0]]`);
+assert.equal(ident(Object.assign({}, atEnd, { name: "(9) Abro" }), 36120).number, "208", "an operation number given by hand: matched with it");
+run(`status.train_tags = [["(9) Abro", "", "501", 1]]`);
+const given = ident(Object.assign({}, atEnd, { name: "(9) Abro" }), 36120);
+assert.ok(given.number === "501" && given.red && given.one === "501", "a train number given by hand wins; its train of the diagram gives the delay; marked red");
+run(`status.train_tags = [["(9) Abro", "", "9999X", 0]]`);
+const free = ident(Object.assign({}, atEnd, { name: "(9) Abro" }), 36120);
+assert.ok(free.number === "9999X" && free.one === null, "a train number not in the diagram: shown as given, no delay");
+run(`status.train_tags = []; operationData = null;`);
+console.log("PASS: modern and legacy operations, turnarounds (also the number at the turning station), numbers given by hand, platforms, shunts, coupling/splitting, renumbering, link codes, midnight, conflicts and thresholds");

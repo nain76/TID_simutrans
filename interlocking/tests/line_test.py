@@ -6,6 +6,7 @@ Line panels (路線盤) in the game (scenario il-test): the drawing of a whole l
   2. rename, editing notice, a part a line panel has no use for, an interrupted upload, the lowest free number
   3. turning the map: the tiles turn, the drawing stays
   4. saving and loading (also an upload interrupted by saving: a client joining in the middle of it)
+  also: trains given numbers by hand (tr_tag / tr_untag), saved
   5. delete
 
 Usage: line_test.py --sim build/default/sim --workdir <dir>
@@ -70,6 +71,14 @@ def run(args):
             p.wait_event(lambda e: e["type"] == "rotated", 30)
         check(line(lid)["parts"] == before["parts"], "four turns restore the tiles")
 
+        print("[3b] trains given numbers by hand (by the name of the train)")
+        check(p.cmd("tr_tag,%281%29%20Abro,A01,,0")["ok"] and p.status()["train_tags"] == [["(1) Abro", "A01", "", 0]], "an operation number given")
+        check(p.cmd("tr_tag,%281%29%20Abro,A01,201T,1")["ok"] and p.status()["train_tags"] == [["(1) Abro", "A01", "201T", 1]], "a train number and the special mark (red): replaces")
+        check(p.cmd("tr_tag,Other,,,1")["ok"] and len(p.status()["train_tags"]) == 2, "only marked red")
+        check(p.cmd("tr_tag,Other,,,0")["ok"] and len(p.status()["train_tags"]) == 1, "nothing given: gone")
+        check(not p.cmd("tr_tag,,A01,,0")["ok"] and not p.cmd("tr_tag,x%FF,A01,,0")["ok"] and not p.cmd("tr_tag,x,A01,,300")["ok"], "no name / not UTF-8 / bad flags refused")
+        check(p.cmd("tr_tag,Gone,B02,,0")["ok"] and p.cmd("tr_untag,Gone")["ok"] and len(p.status()["train_tags"]) == 1, "tr_untag")
+
         print("[4] save and load")
         # an upload interrupted by saving (a client joins in the middle of it)
         check(p.cmd(f"ln_begin,{lid}")["ok"] and p.cmd(f"ln_add,{lid},{parts[0]};{parts[5]}")["ok"], "an upload in progress")
@@ -92,6 +101,7 @@ def run(args):
         strip = lambda ls: [(x["id"], x["name"], x["parts"]) for x in ls]
         check(strip(loaded["lines"]) == strip(saved), f"line panels restored ({strip(loaded['lines'])})")
         check(line(lid)["parts"] == saved_parts, "their parts restored")
+        check(loaded["train_tags"] == [["(1) Abro", "A01", "201T", 1]], "the trains given numbers by hand restored")
         check(p.cmd(f"ln_end,{lid},2")["ok"] and [x["t"] for x in line(lid)["parts"]] == ["T", "L"], "the upload goes on after loading: its parts were saved")
 
         print("[5] delete")

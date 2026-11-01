@@ -93,6 +93,19 @@ const spans = run2("lineRouteSpans(parts)");
 const third = of("T").find(p => p.b.some(t => t.join(",") === "153,24,0"));
 assert.ok(spans.length >= 1 && spans.every(sp => sp[1] === third.y1 && sp[3] === third.y1), "a set route drawn on the line(s) of the third track, an idle one not");
 
+// 6. colours of the train numbers: rules kept in the style part, the first fitting one; red given by hand
+run(`var ruled = [{ t: "Y", x1: 0, y1: 0, x2: 0, y2: 0, b: [], f: 0, s: encodeURIComponent(JSON.stringify({ rules: [
+	{ k: "cars", v: "10", c: "#ffd400" }, { k: "cars", v: "8", c: "#ffffff" }, { k: "type", v: "臨時", c: "#40ff60" }, { k: "number", v: "T$", c: "#40d0ff" }, { k: "op", v: "(", c: "#000" } ] })) }];
+	var rules = lineRules(ruled);`);
+const color = (t) => run(`lineNumberColor(rules, ${JSON.stringify(t)})`);
+assert.equal(color({ cars: 10, number: "201" }), "#ffd400", "10 cars");
+assert.equal(color({ cars: 8, number: "201" }), "#ffffff", "8 cars");
+assert.equal(color({ cars: 6, number: "201", type: "臨時急行" }), "#40ff60", "by the type");
+assert.equal(color({ cars: 6, number: "9999T" }), "#40d0ff", "by the train number (regular expression)");
+assert.equal(color({ cars: 6, number: "201", op: "A01" }), "#ffb31a", "none fits: orange (a broken expression fits nothing)");
+assert.equal(color({ cars: 10, number: "201", red: true }), "#ff4040", "marked red by hand wins");
+assert.equal(run("lineRules([]).length"), 0, "no style part: no rules");
+
 if (process.argv[2]) {
 	// the draft drawn roughly, to look at
 	const S = 10, mx = Math.max(...parts.flatMap(p => [p.x1, p.x2])) + 20, my = Math.max(...parts.flatMap(p => [p.y1, p.y2])) + 6;
@@ -106,4 +119,4 @@ if (process.argv[2]) {
 	}
 	fs.writeFileSync(process.argv[2], out.join("") + "</svg>");
 }
-console.log(`PASS: line panel draft: shortened, stations (boxes / platform marks / names), windows by side and direction, branch, clock; blocks, train numbers in windows / boxes by direction, routes (${parts.length} parts)`);
+console.log(`PASS: line panel draft: shortened, stations (boxes / platform marks / names), windows by side and direction, branch, clock; blocks, train numbers in windows / boxes by direction, routes, colour rules (${parts.length} parts)`);

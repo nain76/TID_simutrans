@@ -1,6 +1,7 @@
 // Web panel: line panels (路線盤) with trains running (scenario il-test)
 //   1. a route set on the station's panel is drawn red on the line panel
-//   2. a train out of the depot: its block red, its number in a window or a number box
+//   2. a train out of the depot: its block red, its number in a window or a number box; its details on a click,
+//      a train number given by hand (red) and taken back
 //   3. a line panel shown asks the game for the trains only (tiles=0); the tiles again when the tracks change
 //
 //   node interlocking/tests/panel_line_run_test.mjs <sim binary> <workdir> <screenshot dir>
@@ -72,6 +73,7 @@ try {
 	await line(`debug_tool ${simpleTool("TOOL_CHANGE_DEPOT")} b,1,5,0,${cid}`);
 	await page.waitForFunction(() => document.querySelectorAll("#lineMap .train").length > 0, null, { timeout: 60000 });
 	const number = await page.evaluate(() => operationNumber(network.convoys[0].name));
+	const name = await page.evaluate(() => network.convoys[0].name);
 	const shown = await page.$$eval("#lineMap .train text", ts => ts.map(t => t.textContent));
 	check(shown.includes(number), `the train's number is shown in a window or a box (${shown.join(" / ")}; expected ${number})`);
 	check(await page.$$eval("#lineMap line", ls => ls.some(l => l.getAttribute("stroke") === "#ff3b30" && !l.classList.contains("lnroute"))), "its block is red");
@@ -80,6 +82,27 @@ try {
 	await page.waitForFunction(() => [...document.querySelectorAll("#lineMap .train")].some(g => lnPartsShown()[Number(g.dataset.lnpart)]?.t === "B"), null, { timeout: 90000 }).catch(() => {});
 	check(await page.evaluate(() => [...document.querySelectorAll("#lineMap .train")].some(g => lnPartsShown()[Number(g.dataset.lnpart)]?.t === "B")), "at the station: in the number box of its track");
 	if (shots) await page.screenshot({ path: path.join(shots, "line_run_3_station.png") });
+
+	console.log("[2b] the details of a train, numbers given by hand");
+	await page.locator("#lineMap .train text").first().click();
+	await page.waitForSelector("#lnModal:not([hidden]) .lnhead");
+	const head = await page.textContent("#lnModal .lnhead b");
+	check(head.includes(number), `the details open on a click (${head})`);
+	check((await page.textContent("#lnModal .lnbox")).includes("両編成"), "with the number of cars");
+	await page.fill("#lnModal [data-x=num]", "201T");
+	await page.check("#lnModal [data-x=red]");
+	await page.click("#lnModal [data-x=save]");
+	await waitFor(async () => JSON.stringify((await st()).train_tags) === JSON.stringify([[name, "", "201T", 1]]), 8000, "tag saved");
+	check(true, "given by hand: saved in the game by the name of the train");
+	await page.waitForFunction(() => [...document.querySelectorAll("#lineMap .train text")].some(t => t.textContent === "201T" && t.getAttribute("fill") === "#ff4040"), null, { timeout: 8000 });
+	check(true, "shown as given, in red (special train number)");
+	if (shots) await page.screenshot({ path: path.join(shots, "line_run_2b_given.png") });
+	await page.locator("#lineMap .train text").first().click();
+	await page.waitForSelector("#lnModal:not([hidden]) [data-x=clear]:not([disabled])");
+	await page.click("#lnModal [data-x=clear]");
+	await waitFor(async () => !(await st()).train_tags.length, 8000, "tag removed");
+	await page.waitForFunction((n) => [...document.querySelectorAll("#lineMap .train text")].some(t => t.textContent === n), number, { timeout: 8000 });
+	check(true, "元に戻す: the number of the game again");
 
 	console.log("[3] the trains only");
 	const later = asked.slice(-5);

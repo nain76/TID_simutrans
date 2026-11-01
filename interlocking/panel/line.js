@@ -254,11 +254,27 @@ function lineBlocks(tiles) {
 const innerTiles = (p) => (p.b || []).length > 2 ? p.b.slice(1, -1) : (p.b || []);
 // train number (as matched with the diagram, else the operation number of the game) and delay in whole minutes
 function lineTrainLabel(c, data) {
-	const diagram = operationData?.diagrams[operationConfig.diagram];
-	const matches = diagram ? matchOperation(c.name, data.seconds, diagram, operationConfig.early, operationConfig.late, c.halt, c) : [];
-	const one = matches.length === 1 ? matches[0] : null;
-	const delay = trainDelay(c, data.seconds, one);
-	return { number: (one && one.number) || operationNumber(c.name), minutes: delay.seconds >= 60 ? Math.floor(delay.seconds / 60) : 0 };
+	const id = identifyTrain(c, data);
+	return { convoy: c, number: id.number, op: id.op, red: id.red, cars: c.cars || 0, type: id.one?.type || "", destination: id.one ? id.one.stops[id.one.to]?.name || id.one.destination : "",
+		entry: id.one, delay: id.delay, minutes: id.delay.seconds >= 60 ? Math.floor(id.delay.seconds / 60) : 0 };
+}
+
+// colours of the train numbers: rules of the line panel, kept in its style part (Y) as encoded JSON:
+// [{ k: "cars" | "type" | "number" | "op", v: value (cars: a number; the others: a regular expression), c: colour }].
+// The first rule that fits wins; a train marked by hand (special train number) is red
+const LINE_NUMBER_COLOR = "#ffb31a", LINE_SPECIAL_COLOR = "#ff4040";
+function lineRules(parts) {
+	const y = (parts || []).find(p => p.t === "Y");
+	try { const r = JSON.parse(decodeURIComponent(y?.s || "")); return Array.isArray(r?.rules) ? r.rules : []; } catch (e) { return []; }
+}
+function lineNumberColor(rules, t) {
+	if (t.red) return LINE_SPECIAL_COLOR;
+	const fits = (r) => {
+		if (r.k === "cars") return Number(r.v) === t.cars;
+		const text = r.k === "type" ? t.type : r.k === "op" ? t.op : t.number;
+		try { return new RegExp(r.v).test(text || ""); } catch (e) { return false; }
+	};
+	return (rules.find(r => r && r.c && fits(r)) || {}).c || LINE_NUMBER_COLOR;
 }
 // where each train is shown: the number box of the platform it stands at, else the window of its block that
 // shows its direction. part index -> label
@@ -308,7 +324,11 @@ function lineRouteSpans(parts) {
 // drawing
 // ---------------------------------------------------------------------------
 const lineText = (p) => { try { return decodeURIComponent(p.s || ""); } catch (e) { return p.s || ""; } };
+// a number for each set of parts drawn (a new set: drawn anew)
+const lineDrawn = new WeakMap();
+let lineDrawnNext = 1;
 function renderLineMap(svg, wrap, parts, data) {
+	if (!lineDrawn.has(parts)) lineDrawn.set(parts, lineDrawnNext++);
 	const placed = parts.filter(p => p.t !== "Y");
 	// a station name reaches beyond its point: about its number of characters times its size (in steps)
 	const reach = (p) => p.t === "N" ? (lineText(p).length * (p.f & 1 ? .75 : 1.1) + 1) : p.t === "C" ? 4 : 0;
@@ -317,6 +337,18 @@ function renderLineMap(svg, wrap, parts, data) {
 	const G = Math.max(3, Math.min(40, (fit || 10) * networkMapZoom));   // pixels per grid step
 	// the blue fills the frame even when the drawing is smaller
 	const SW = Math.max(GW * G, wrap.clientWidth - 2), SH = Math.max(GH * G, wrap.clientHeight - 2);
+	const redLines = lnEdit ? new Set() : lineOccupied(parts, data);
+	const places = lnEdit ? new Map() : lineTrainPlaces(parts, data);
+	const rules = lineRules(parts);
+	const spans = lnEdit ? [] : lineRouteSpans(parts);
+	// nothing changed but the time (not editing): only the clock is written again. A drawing made anew every
+	// time lost clicks on it and cost the browser for nothing
+	const sig = lnEdit ? null : JSON.stringify([lineDrawn.get(parts), SW, SH, G, [...redLines], [...places].map(([i, t]) => [i, t.number, t.minutes, lineNumberColor(rules, t)]), spans]);
+	if (sig && sig === svg.dataset.sig) {
+		for (const t of svg.querySelectorAll(".lnclock")) t.textContent = data?.time || clockOf(status).hms;
+		return;
+	}
+	svg.dataset.sig = sig || "";
 	svg.setAttribute("viewBox", `0 0 ${SW} ${SH}`);
 	svg.setAttribute("width", SW);
 	svg.setAttribute("height", SH);
@@ -331,8 +363,6 @@ function renderLineMap(svg, wrap, parts, data) {
 		const dots = el("g", { "pointer-events": "none" }, svg);
 		for (let x = 0; x <= GW; x += 2) for (let y = 0; y <= GH; y += 2) el("circle", { cx: X(x), cy: Y(y), r: 1, fill: "#5f86ff" }, dots);
 	}
-	const redLines = lnEdit ? new Set() : lineOccupied(parts, data);
-	const places = lnEdit ? new Map() : lineTrainPlaces(parts, data);
 	// a number written in a box: as large as fits
 	const digits = (grp, text, x, y, w, h, color) => {
 		const fs = Math.max(6, Math.min(h * .8, w / Math.max(2, String(text).length * .62)));
@@ -357,13 +387,18 @@ function renderLineMap(svg, wrap, parts, data) {
 			const r = rect(p);
 			el("rect", Object.assign({ fill: "#0b2c99", stroke: "#5d82ff", "stroke-width": 1.2 }, r), grp);
 			const train = places.get(i);
+			const color = train ? lineNumberColor(rules, train) : null;
+			if (train) {
+				grp.style.cursor = "pointer";
+				grp.addEventListener("click", (e) => { e.stopPropagation(); openTrainDetail(train); });
+			}
 			if (p.t === "W") {
 				// the train number and, at the right, the delay in minutes
 				const dx = r.x + r.width - Math.min(r.width / 3, G * 1.6);
 				el("line", { x1: dx, y1: r.y, x2: dx, y2: r.y + r.height, stroke: "#5d82ff", "stroke-width": 1 }, grp);
 				if (train) {
 					grp.setAttribute("class", (grp.getAttribute("class") || "") + " train");
-					digits(grp, train.number, r.x + (dx - r.x) / 2, r.y, dx - r.x - 2, r.height, "#ffb31a");
+					digits(grp, train.number, r.x + (dx - r.x) / 2, r.y, dx - r.x - 2, r.height, color);
 					if (train.minutes) digits(grp, train.minutes, dx + (r.x + r.width - dx) / 2, r.y, r.x + r.width - dx - 2, r.height, "#ff4040");
 				}
 			}
@@ -372,7 +407,7 @@ function renderLineMap(svg, wrap, parts, data) {
 				el("rect", { x: cxm - s / 2, y: sy, width: s, height: s, fill: "#0b2c99", stroke: "#5d82ff", "stroke-width": 1.2 }, grp);
 				if (train) {
 					grp.setAttribute("class", (grp.getAttribute("class") || "") + " train");
-					digits(grp, train.number, cxm, r.y, r.width - 4, r.height, "#ffb31a");
+					digits(grp, train.number, cxm, r.y, r.width - 4, r.height, color);
 					if (train.minutes) digits(grp, train.minutes, cxm, sy, s - 2, s, "#ff4040");
 				}
 			}
@@ -392,10 +427,10 @@ function renderLineMap(svg, wrap, parts, data) {
 		}
 		else if (p.t === "L") el("text", { x: X(p.x1), y: Y(p.y1), "font-size": Math.max(8, G * 1.2), fill: "#ffffff", "text-anchor": "middle", "dominant-baseline": "middle" }, grp).textContent = lineText(p) || "（文字）";
 		else if (p.t === "F") el("rect", Object.assign({ fill: "none", stroke: "#9db4ff", "stroke-width": 1.2, "stroke-dasharray": "6 4" }, rect(p)), grp);
-		else if (p.t === "C") el("text", { x: X(p.x1), y: Y(p.y1), "font-size": Math.max(9, G * 1.3), fill: "#ffffff", "font-family": "monospace", "text-anchor": "middle", "dominant-baseline": "middle" }, grp).textContent = data?.time || clockOf(status).hms;
+		else if (p.t === "C") el("text", { x: X(p.x1), y: Y(p.y1), "font-size": Math.max(9, G * 1.3), fill: "#ffffff", "font-family": "monospace", "text-anchor": "middle", "dominant-baseline": "middle", class: "lnclock" }, grp).textContent = data?.time || clockOf(status).hms;
 	}
 	// routes set on the panels of the stations
-	if (!lnEdit) for (const [ax, ay, bx, by] of lineRouteSpans(parts))
+	if (!lnEdit) for (const [ax, ay, bx, by] of spans)
 		el("line", { x1: X(ax), y1: Y(ay), x2: X(bx), y2: Y(by), stroke: "#ff3b30", "stroke-width": Math.max(2, G * .32), "stroke-linecap": "square", class: "lnroute", "pointer-events": "none" }, svg);
 	if (lnEdit && parts[lnEdit.sel] && "TWBHF".includes(parts[lnEdit.sel].t)) {
 		const p = parts[lnEdit.sel];
@@ -425,7 +460,7 @@ function renderLine(data) {
 	if (!onLine) return;
 	const parts = lnEdit ? lnEdit.parts : lineParts(ln);
 	const svg = document.getElementById("lineMap");
-	if (!parts) { svg.replaceChildren(); return; }
+	if (!parts) { svg.replaceChildren(); svg.dataset.sig = ""; return; }
 	renderLineMap(svg, wrap, parts, data);
 }
 
@@ -438,7 +473,7 @@ function lineBarHtml(ln) {
 			tool("W", "＋列番窓", "押してから盤の空いた所を押す。近くの線路に結びつく") +
 			tool("B", "＋番線枠", "押してから番線の線路の上を押す") + tool("H", "＋ホーム", "押してから駅の線路の近くを押す") +
 			tool("N", "＋駅名", "押してから盤の空いた所を押す") + tool("L", "＋文字", "押してから盤の空いた所を押す") +
-			`<button data-ln="clock">時計</button><span class="sep"></span>` +
+			`<button data-ln="clock">時計</button><button data-ln="colors" title="列番の色の決め方（両数・種別・列番・運用番号ごと）">色分け</button><span class="sep"></span>` +
 			(sel && sel.t === "B" ? `<button data-ln="flip" title="遅延表示の箱を上下入れ替える">遅延の箱を${sel.f & 1 ? "上" : "下"}へ</button>` : "") +
 			(sel && sel.t === "N" ? `<button data-ln="small" title="大きな駅名（枠つき）と小さな駅名を切り替える">${sel.f & 1 ? "大きな駅名に" : "小さな駅名に"}</button>` : "") +
 			`<button data-ln="del" ${sel ? "" : "disabled"} title="選んだ部品を消す（Delete キー）">削除</button>` +
@@ -676,6 +711,7 @@ document.getElementById("lineBar").addEventListener("click", async (e) => {
 	else if (!lnEdit) return;
 	else if (c === "tool") { lnEdit.tool = lnEdit.tool === b.dataset.t ? null : b.dataset.t; renderNetwork(); }
 	else if (c === "clock") { lnEdit.parts.push({ t: "C", x1: 8, y1: 2, x2: 8, y2: 2, b: [], s: "", f: 0 }); lnEdit.sel = lnEdit.parts.length - 1; lnEdit.dirty = true; renderNetwork(); }
+	else if (c === "colors") { editLineColors(); return; }
 	else if (c === "flip" || c === "small") { const p = lnEdit.parts[lnEdit.sel]; if (p) { p.f = (p.f || 0) ^ 1; lnEdit.dirty = true; renderNetwork(); } }
 	else if (c === "del" && lnEdit.sel >= 0) { lnEdit.parts.splice(lnEdit.sel, 1); lnEdit.sel = -1; lnEdit.dirty = true; renderNetwork(); }
 	else if (c === "undo" || c === "redo") lnUndo(c === "redo");
@@ -699,3 +735,75 @@ document.getElementById("lineBar").addEventListener("click", async (e) => {
 	lnTrack();
 	if (lnEdit) renderNetwork();
 });
+
+// ---------------------------------------------------------------------------
+// a small window over the page: the details of a train, the colour rules
+// ---------------------------------------------------------------------------
+function lineModal(html) {
+	let m = document.getElementById("lnModal");
+	if (!m) { m = document.createElement("div"); m.id = "lnModal"; document.body.appendChild(m); m.addEventListener("click", (e) => { if (e.target === m) m.hidden = true; }); }
+	m.innerHTML = `<div class="lnbox">${html}</div>`;
+	m.hidden = false;
+	return m;
+}
+const hhmm = (t) => t == null ? "" : `${Math.floor(((t % 86400) + 86400) % 86400 / 3600)}:${String(Math.floor(((t % 86400) + 86400) % 86400 / 60) % 60).padStart(2, "0")}`;
+// the details of a train (列車の詳細) and its numbers given by hand
+function openTrainDetail(t) {
+	const c = t.convoy, tag = trainTag(c.name);
+	const delay = t.delay.seconds == null ? "遅れ不明" : t.minutes ? `遅れ${t.minutes}分` : "定刻";
+	const stops = t.entry ? t.entry.stops.slice(t.entry.from, t.entry.to + 1).filter(s => s.arrival != null || s.departure != null) : [];
+	const m = lineModal(`<div class="lnhead"><b>列番：${esc(t.number)}</b><button data-x="close">×</button></div>
+		<p><b>${t.cars ? t.cars + "両編成" : ""}</b>　<b class="${t.minutes ? "late" : ""}">${delay}</b></p>
+		<p>${t.type ? `<span class="lntype">${esc(t.type)}</span>　` : ""}${t.destination ? esc(displayStationName(t.destination)) + "　行き" : ""}</p>
+		<p class="hint">ゲームの列車：${esc(c.name)}（運用番号 ${esc(t.op)}）${t.entry ? "" : "／ダイヤの列車は特定できていません"}</p>
+		${stops.length ? `<table class="lntable"><tr><th>駅</th><th>到着時刻</th><th>発車時刻</th></tr>${stops.map(s => `<tr><td>${esc(displayStationName(s.name))}</td><td>${s.arrival == null ? "—" : hhmm(s.arrival)}</td><td>${s.departure == null ? "—" : hhmm(s.departure)}</td></tr>`).join("")}</table>` : ""}
+		<h3>手で付け直す（全員の盤に反映、ゲームに保存）</h3>
+		<p class="hint">ダイヤと合わない列車に。ゲームの列車名「${esc(c.name)}」に結びつきます（同じ名前の列車も同じになります）。</p>
+		<div class="row"><label>運用番号 <input data-x="op" value="${esc(tag?.op || "")}" placeholder="${esc(operationNumber(c.name))}"></label>
+		<label>列番 <input data-x="num" value="${esc(tag?.number || "")}" placeholder="自動"></label>
+		<label><input type="checkbox" data-x="red" ${tag && tag.flags & 1 ? "checked" : ""}> 特殊列番（赤）</label></div>
+		<div class="row"><button data-x="save" class="primary">保存</button><button data-x="clear" ${tag ? "" : "disabled"}>元に戻す</button></div>`);
+	m.querySelector("[data-x=close]").onclick = () => { m.hidden = true; };
+	const send = async (cmd) => {
+		const r = await commandResult(cmd);
+		if (!r.ok) { toast("保存できませんでした: " + tr(r.error), true); return; }
+		m.hidden = true;
+		await refreshStatus(); renderNetwork();
+	};
+	m.querySelector("[data-x=save]").onclick = () => {
+		const op = m.querySelector("[data-x=op]").value.trim(), num = m.querySelector("[data-x=num]").value.trim(), red = m.querySelector("[data-x=red]").checked;
+		send(`tr_tag,${encodeURIComponent(c.name)},${encodeURIComponent(op)},${encodeURIComponent(num)},${red ? 1 : 0}`);
+	};
+	m.querySelector("[data-x=clear]").onclick = () => send(`tr_untag,${encodeURIComponent(c.name)}`);
+}
+// the colour rules of the line panel being edited (kept in its style part on 適用)
+function editLineColors() {
+	if (!lnEdit) return;
+	const rules = lineRules(lnEdit.parts).map(r => Object.assign({}, r));
+	const kinds = [["cars", "両数が"], ["type", "種別が"], ["number", "列番が"], ["op", "運用番号が"]];
+	const draw = () => {
+		const m = lineModal(`<div class="lnhead"><b>列番の色分け</b><button data-x="close">×</button></div>
+			<p class="hint">上から順に調べ、最初に当てはまった色にします。どれにも当たらなければ橙、手で「特殊列番」にした列車は赤。
+			両数は数、ほかは正規表現（例：種別「快速」、列番「T$」＝末尾が T）。</p>
+			<table class="lntable">${rules.map((r, i) => `<tr><td><select data-i="${i}" data-f="k">${kinds.map(([k, l]) => `<option value="${k}" ${r.k === k ? "selected" : ""}>${l}</option>`).join("")}</select></td>
+				<td><input data-i="${i}" data-f="v" value="${esc(r.v || "")}"></td><td><input type="color" data-i="${i}" data-f="c" value="${esc(r.c || "#ffffff")}"></td>
+				<td><button data-i="${i}" data-x="del">削除</button></td></tr>`).join("")}</table>
+			<div class="row"><button data-x="add">＋条件</button><span class="sep"></span><button data-x="ok" class="primary">決定</button><button data-x="close2">やめる</button></div>
+			<p class="hint">「決定」のあと、編集の「適用」でゲームに保存されます。</p>`);
+		const read = () => m.querySelectorAll("[data-f]").forEach(e => { rules[Number(e.dataset.i)][e.dataset.f] = e.value; });
+		m.querySelector("[data-x=close]").onclick = m.querySelector("[data-x=close2]").onclick = () => { m.hidden = true; };
+		m.querySelector("[data-x=add]").onclick = () => { read(); rules.push({ k: "cars", v: "10", c: "#ffd400" }); draw(); };
+		m.querySelectorAll("[data-x=del]").forEach(b => b.onclick = () => { read(); rules.splice(Number(b.dataset.i), 1); draw(); });
+		m.querySelector("[data-x=ok]").onclick = () => {
+			read();
+			let y = lnEdit.parts.find(p => p.t === "Y");
+			if (!y) { y = { t: "Y", x1: 0, y1: 0, x2: 0, y2: 0, b: [], s: "", f: 0 }; lnEdit.parts.push(y); }
+			const s = encodeURIComponent(JSON.stringify({ rules: rules.filter(r => r.v !== "").map(r => ({ k: r.k, v: r.v, c: r.c })) }));
+			if (s.length > 1900) { toast("色分けの条件が多すぎます（減らしてください）", true); return; }
+			y.s = s;
+			lnEdit.dirty = true; lnTrack();
+			m.hidden = true; renderNetwork();
+		};
+	};
+	draw();
+}
