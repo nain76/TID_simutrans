@@ -12,6 +12,9 @@ const lineCache = new Map();   // line id -> { rev, parts }
 let lineFetching = 0;
 let lnEdit = null;             // editing: { id, parts, sel, tool, undo, redo, last, dirty, rev }
 let lineView = localStore("line.view") || "map";   // "map" (the map of the game) or the id of a line panel
+// what the windows show: the train number (列番), the name of the schedule (スケジュール名) or of the train (編成名)
+let lineLabelMode = ["number", "line", "name"].includes(localStore("line.label")) ? localStore("line.label") : "number";
+let lnPick = null;             // choosing the range of a new line panel on the map: { name, from, to }
 const LINE_PART_TYPES = "TWBHNLFCY";
 const lineName = (ln) => { try { return decodeURIComponent(ln.name); } catch (e) { return ln.name; } };
 const linesOf = () => status.lines || [];
@@ -47,7 +50,7 @@ async function uploadLine(id, parts) {
 // get number boxes on their platform tracks (stations with points) or a platform mark, and the blocks
 // between stations a train number window
 // ---------------------------------------------------------------------------
-const LINE_KEEP = 4;   // columns / rows of plain straight track kept of a long stretch
+const LINE_KEEP = 4;   // columns / rows of plain track kept of a long stretch
 function makeLineDraft(data) {
 	const tiles = new Map();   // "x,y" -> { p, r, halt, s } (heights are not drawn: a bridge over a track is one tile)
 	for (const t of data?.tiles || []) {
@@ -60,36 +63,10 @@ function makeLineDraft(data) {
 	const at = (x, y) => tiles.get(x + "," + y);
 	const nb = (t, d) => { const n = at(t.p[0] + DXY[d][0], t.p[1] + DXY[d][1]); return n && (n.r & BACK[d]) ? n : null; };
 	const links = (t) => DIRS.filter(d => (t.r & d) && nb(t, d));
-	// 1. shorten: a column of nothing but plain east-west track (no station, no signal) can go, keeping a few
-	const xs = [...tiles.values()].map(t => t.p[0]), ys = [...tiles.values()].map(t => t.p[1]);
-	const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-	const plain = (t, r) => t.r === r && !t.halt && !t.s;
-	function squeeze(lo, hi, cells, r) {
-		const map = new Map();
-		let c = 0, run = 0;
-		for (let v = lo; v <= hi; v++) {
-			const cs = cells(v);
-			const removable = cs.every(t => plain(t, r));
-			run = removable ? run + 1 : 0;
-			// a gap without any track keeps one column, plain track a few
-			const keep = removable ? (cs.length ? LINE_KEEP : 1) : Infinity;
-			if (run <= keep) c++;
-			map.set(v, c - 1);
-		}
-		return map;
-	}
-	const byX = new Map(), byY = new Map();
-	for (const t of tiles.values()) {
-		if (!byX.has(t.p[0])) byX.set(t.p[0], []);
-		if (!byY.has(t.p[1])) byY.set(t.p[1], []);
-		byX.get(t.p[0]).push(t); byY.get(t.p[1]).push(t);
-	}
-	const cx = squeeze(x0, x1, v => byX.get(v) || [], E | W), cy = squeeze(y0, y1, v => byY.get(v) || [], N | S);
-	const G = (t) => [2 * cx.get(t.p[0]) + 1, 2 * cy.get(t.p[1]) + 1];
-	// 2. chains of track between nodes (junctions, ends, signals, the edges of stations): one line each, or a
-	// few straight lines where it bends
-	const node = (t) => { const l = links(t); return l.length !== 2 || !!t.s || l.some(d => !!nb(t, d).halt !== !!t.halt); };
-	const parts = [], seen = new Set();
+	// 1. chains of track between nodes (junctions, ends, the edges of stations). Signals do not cut a chain: a
+	// diagonal with signals on it is still one straight line (the blocks are drawn along it)
+	const node = (t) => { const l = links(t); return l.length !== 2 || l.some(d => !!nb(t, d).halt !== !!t.halt); };
+	const seen = new Set();
 	const edgeKey = (t, d) => t.p[0] + "," + t.p[1] + "|" + d;
 	function chainFrom(t, d) {
 		const chain = [t];
@@ -109,11 +86,48 @@ function makeLineDraft(data) {
 	}
 	const chains = [];
 	for (const t of tiles.values()) if (node(t)) for (const d of links(t)) if (!seen.has(edgeKey(t, d))) chains.push(chainFrom(t, d));
-	// a loop without any node
-	for (const t of tiles.values()) for (const d of links(t)) if (!seen.has(edgeKey(t, d))) chains.push(chainFrom(t, d));
+	for (const t of tiles.values()) for (const d of links(t)) if (!seen.has(edgeKey(t, d))) chains.push(chainFrom(t, d));   // a loop without any node
+	// 2. shorten: a column can go where all its tiles lie on plain chains going east-west or diagonally (a row: north-
+	// south or diagonally), keeping a few of a long stretch; a column with a north-south chain in it stays (two
+	// tracks side by side would fall onto one another)
+	const lie = new Map();   // tile -> "h" | "v" | "d" (plain track of a chain going that way)
+	for (const c of chains) for (let i = 1; i < c.length - 1; i++) {
+		if (c[i].halt) continue;
+		// the way the track goes here: over a few tiles before and after
+		const a = c[Math.max(0, i - 4)], z = c[Math.min(c.length - 1, i + 4)];
+		const dx = Math.abs(z.p[0] - a.p[0]), dy = Math.abs(z.p[1] - a.p[1]);
+		const o = dx > 2 * dy ? "h" : dy > 2 * dx ? "v" : "d";
+		lie.set(c[i], lie.has(c[i]) && lie.get(c[i]) !== o ? "x" : o);
+	}
+	const xs = [...tiles.values()].map(t => t.p[0]), ys = [...tiles.values()].map(t => t.p[1]);
+	const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+	function squeeze(lo, hi, cells, ok) {
+		const map = new Map();
+		let c = 0, run = 0;
+		for (let v = lo; v <= hi; v++) {
+			const cs = cells(v);
+			const removable = cs.every(t => ok.includes(lie.get(t)));
+			run = removable ? run + 1 : 0;
+			// a gap without any track keeps one column, plain track a few; where a diagonal goes through, one column
+			// in three stays (its slope stays the same in both ways)
+			const keep = removable ? (cs.length ? LINE_KEEP : 1) : Infinity;
+			if (run <= keep || (cs.some(t => lie.get(t) === "d") && run % 3 === 0)) c++;
+			map.set(v, c - 1);
+		}
+		return map;
+	}
+	const byX = new Map(), byY = new Map();
+	for (const t of tiles.values()) {
+		if (!byX.has(t.p[0])) byX.set(t.p[0], []);
+		if (!byY.has(t.p[1])) byY.set(t.p[1], []);
+		byX.get(t.p[0]).push(t); byY.get(t.p[1]).push(t);
+	}
+	const cx = squeeze(x0, x1, v => byX.get(v) || [], ["h", "d"]), cy = squeeze(y0, y1, v => byY.get(v) || [], ["v", "d"]);
+	const G = (t) => [2 * cx.get(t.p[0]) + 1, 2 * cy.get(t.p[1]) + 1];
+	// 3. each chain: one line, or a few straight lines where it bends (stairs of a diagonal, whose corners are 1.4 steps off and up to a tile off where it was shortened, and gentle curves: within 2.2 steps)
+	const parts = [];
 	for (const chain of chains) {
 		const pts = chain.map(G);
-		// drop points on the way of a straight line (also stairs of a diagonal and gentle curves: within 1.2 steps)
 		const keep = [0];
 		for (let i = 1; i < pts.length; i++) {
 			const a = pts[keep[keep.length - 1]];
@@ -121,7 +135,7 @@ function makeLineDraft(data) {
 				const b = pts[j], len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
 				for (let m = keep[keep.length - 1] + 1; m < j; m++) {
 					const q = pts[m];
-					if (Math.abs((b[0] - a[0]) * (a[1] - q[1]) - (a[0] - q[0]) * (b[1] - a[1])) / len > 1.2) return false;
+					if (Math.abs((b[0] - a[0]) * (a[1] - q[1]) - (a[0] - q[0]) * (b[1] - a[1])) / len > 2.2) return false;
 				}
 				return true;
 			};
@@ -133,23 +147,12 @@ function makeLineDraft(data) {
 			parts.push({ t: "T", x1: a[0], y1: a[1], x2: b[0], y2: b[1], b: chain.slice(keep[k - 1], keep[k] + 1).map(t => t.p), s: "", f: 0 });
 		}
 	}
-	// 3. stations: the platform tiles of each stop, its platform tracks (tiles of the stop joined by track)
+	// 4. stations: the platform tiles of each stop, its platform tracks (tiles of the stop joined by track)
 	const stops = new Map();
 	for (const t of tiles.values()) if (t.halt) { if (!stops.has(t.halt)) stops.set(t.halt, []); stops.get(t.halt).push(t); }
-	const boxes = [];   // rectangles taken (windows must not cover them)
+	const boxes = [];   // rectangles taken (windows and names must not cover them)
 	const take = (r) => boxes.push(r);
 	const free = (r) => !boxes.some(b => r.x1 < b.x2 + 1 && r.x2 > b.x1 - 1 && r.y1 < b.y2 + 1 && r.y2 > b.y1 - 1);
-	// a station name: above its station, moved further up (then down) where another name or box is in the way
-	const placeName = (name, cxm, y, small) => {
-		const half = (name.length * (small ? .75 : 1.1) + 1) / 2;
-		const at = (yy) => ({ x1: cxm - half, x2: cxm + half, y1: yy - 1.5, y2: yy + 1.5 });
-		// nor on a track
-		const onTrack = (r) => parts.some(q => q.t === "T" && Math.min(q.x1, q.x2) <= r.x2 && Math.max(q.x1, q.x2) >= r.x1 && Math.min(q.y1, q.y2) <= r.y2 && Math.max(q.y1, q.y2) >= r.y1);
-		const tries = [0, -3, -6, -9, -12, -15, -18, -21, 3, 6, 9, 12].map(d => y + d);
-		const yy = tries.find(v => free(at(v)) && !onTrack(at(v))) ?? tries.find(v => free(at(v))) ?? y;
-		parts.push({ t: "N", x1: cxm, y1: yy, x2: cxm, y2: yy, b: [], s: encodeURIComponent(name), f: small ? 1 : 0 });
-		take(at(yy));
-	};
 	for (const [name, ts] of stops) {
 		const tracks = [], done = new Set();
 		for (const t of ts) {
@@ -175,59 +178,118 @@ function makeLineDraft(data) {
 				const box = gy1 === gy2 ? { x1: gx1 - 1, y1: gy1 - 1, x2: Math.max(gx2 + 1, gx1 + 5), y2: gy1 + 1 } : { x1: gx1 - 1, y1: gy1 - 1, x2: gx2 + 1, y2: gy2 + 1 };
 				// the delay box above the upper tracks, below the others
 				const below = tracks.length > 1 && gy1 >= mid ? 1 : 0;
-				parts.push(Object.assign({ t: "B", b: comp.map(t => t.p), s: "", f: below }, box));
+				parts.push(Object.assign({ t: "B", b: comp.map(t => t.p), s: encodeURIComponent(name), f: below }, box));
 				take({ x1: box.x1, x2: box.x2, y1: below ? box.y1 : box.y1 - 3, y2: below ? box.y2 + 3 : box.y2 });
 			}
-			const cxm = Math.round((sx1 + sx2) / 2);
-			placeName(name, cxm, sy1 - 5, false);
 		}
 		else {
-			// between its tracks (or beside the one track): the platform, the name above
+			// between its tracks (or beside the one track): the platform
 			const h = sy1 === sy2 ? { x1: sx1 - 1, y1: sy1 - 2, x2: Math.max(sx2 + 1, sx1 + 2), y2: sy1 - 1 } : { x1: sx1 - 1, y1: Math.round(mid) - 1, x2: Math.max(sx2 + 1, sx1 + 2), y2: Math.round(mid) + 1 };
 			parts.push(Object.assign({ t: "H", b: ts.map(t => t.p), s: encodeURIComponent(name), f: 0 }, h));
-			const cxm = Math.round((sx1 + sx2) / 2);
 			take(h);
-			placeName(name, cxm, sy1 - 3, true);
 		}
 	}
-	// 4. train number windows: on the long straight lines between stations, above an upper track, below a
-	// lower one (the window shows the trains of the block of that line)
-	const lines = parts.filter(p => p.t === "T" && p.y1 === p.y2 && Math.abs(p.x2 - p.x1) >= 8 && !p.b.some(q => tiles.get(q[0] + "," + q[1])?.halt));
+	// the station names above their stations (where nothing else is)
+	placeLineNames(parts, boxes);
+	// 5. train number windows: on the long straight lines between stations, one for each block (between signals) of
+	// the line; above an upper track or beside a north-south one, below a lower one
+	const isSig = (q) => !!tiles.get(q[0] + "," + q[1])?.s;
+	const lines = parts.filter(p => p.t === "T" && (p.y1 === p.y2 || p.x1 === p.x2) && Math.abs(p.x2 - p.x1) + Math.abs(p.y2 - p.y1) >= 8 && !p.b.some(q => tiles.get(q[0] + "," + q[1])?.halt));
 	for (const p of lines) {
-		const lx1 = Math.min(p.x1, p.x2), lx2 = Math.max(p.x1, p.x2), y = p.y1;
-		const parallel = (dy) => parts.some(q => q.t === "T" && q !== p && q.y1 === q.y2 && q.y1 - y === dy && Math.min(q.x1, q.x2) < lx2 && Math.max(q.x1, q.x2) > lx1);
-		const up = [1, 2, 3, 4, 5, 6].some(dy => parallel(-dy)), down = [1, 2, 3, 4, 5, 6].some(dy => parallel(dy));
+		const flat = p.y1 === p.y2;
+		const lo = flat ? Math.min(p.x1, p.x2) : Math.min(p.y1, p.y2), hi = flat ? Math.max(p.x1, p.x2) : Math.max(p.y1, p.y2), pos = flat ? p.y1 : p.x1;
+		const parallel = (d) => parts.some(q => q.t === "T" && q !== p && (flat ? q.y1 === q.y2 && q.y1 - pos === d && Math.min(q.x1, q.x2) < hi && Math.max(q.x1, q.x2) > lo
+			: q.x1 === q.x2 && q.x1 - pos === d && Math.min(q.y1, q.y2) < hi && Math.max(q.y1, q.y2) > lo));
+		const up = [1, 2, 3, 4, 5, 6].some(d => parallel(-d)), down = [1, 2, 3, 4, 5, 6].some(d => parallel(d));
 		// a track between two others (the throat of a station): no room for a window
 		if (up && down) continue;
-		const below = up;
-		const w = 6, x = Math.round((lx1 + lx2) / 2 - w / 2);
-		const r = below ? { x1: x, y1: y + 1, x2: x + w, y2: y + 3 } : { x1: x, y1: y - 3, x2: x + w, y2: y - 1 };
-		if (!free(r)) continue;
-		take(r);
-		const sig = p.b.map(q => tiles.get(q[0] + "," + q[1])?.s).find(s => s && [N, E, S, W].includes(s.dir));
-		parts.push(Object.assign({ t: "W", b: p.b, s: "", f: sig ? sig.dir : 0, ty: y }, r));
+		// the blocks along the line: runs of tiles between signal tiles
+		const runs = [];
+		let cur = [];
+		p.b.forEach((q, i) => { if (isSig(q)) { if (cur.length) runs.push(cur); cur = []; } else cur.push(i); });
+		if (cur.length) runs.push(cur);
+		for (const run of runs) {
+			const f = (run[0] + run[run.length - 1]) / 2 / Math.max(1, p.b.length - 1);
+			const mx = Math.round(p.x1 + (p.x2 - p.x1) * f), my = Math.round(p.y1 + (p.y2 - p.y1) * f);
+			const w = 6;
+			const r = flat ? (up ? { x1: mx - w / 2, y1: pos + 1, x2: mx + w / 2, y2: pos + 3 } : { x1: mx - w / 2, y1: pos - 3, x2: mx + w / 2, y2: pos - 1 })
+				: (up ? { x1: pos + 1, y1: my - 1, x2: pos + 1 + w, y2: my + 1 } : { x1: pos - 1 - w, y1: my - 1, x2: pos - 1, y2: my + 1 });
+			if (!free(r)) continue;
+			take(r);
+			// its direction: of the signal at either end of the block (only one way)
+			const ends = [p.b[run[0] - 1], p.b[run[run.length - 1] + 1]].filter(Boolean).map(q => tiles.get(q[0] + "," + q[1])?.s).filter(s => s && [N, E, S, W].includes(s.dir));
+			parts.push(Object.assign({ t: "W", b: run.map(i => p.b[i]), s: "", f: ends.length ? ends[0].dir : 0, ty: (flat ? "h" : "v") + pos }, r));
+		}
 	}
-	// a window on a line without a signal: the direction of the nearest window on the same track
+	// a window of a block without a signal: the direction of the nearest window on the same track
 	const wins = parts.filter(p => p.t === "W");
 	for (const w of wins) if (!w.f) {
-		const near = wins.filter(o => o.f && o.ty === w.ty).sort((a, b) => Math.abs(a.x1 - w.x1) - Math.abs(b.x1 - w.x1))[0];
+		const near = wins.filter(o => o.f && o.ty === w.ty).sort((a, b) => Math.abs(a.x1 + a.y1 - w.x1 - w.y1) - Math.abs(b.x1 + b.y1 - w.x1 - w.y1))[0];
 		if (near) w.f = near.f;
 	}
 	for (const w of wins) delete w.ty;
-	// 5. the clock at the top left; everything starts at (2,2)
-	const placed = parts.slice();
-	const minX = Math.min(...placed.flatMap(p => [p.x1, p.x2])), minY = Math.min(...placed.flatMap(p => [p.y1, p.y2]));
+	// 6. the clock at the top left; everything starts at (2,2)
+	const minX = Math.min(...parts.flatMap(p => [p.x1, p.x2])), minY = Math.min(...parts.flatMap(p => [p.y1, p.y2]));
 	parts.push({ t: "C", x1: minX + 5, y1: minY - 4, x2: minX + 5, y2: minY - 4, b: [], s: "", f: 0 });
-	const ox = 2 - Math.min(...parts.flatMap(p => [p.x1, p.x2])) + 5, oy = 2 - Math.min(...parts.flatMap(p => [p.y1, p.y2])) + 2;
-	for (const p of parts) { p.x1 += ox; p.x2 += ox; p.y1 += oy; p.y2 += oy; }
+	return normalizeLine(parts);
+}
+// the whole drawing moved to start at the top left (whole steps)
+function normalizeLine(parts) {
+	const placed = parts.filter(p => p.t !== "Y");
+	if (!placed.length) return parts;
+	const ox = 7 - Math.min(...placed.flatMap(p => [p.x1, p.x2])), oy = 4 - Math.min(...placed.flatMap(p => [p.y1, p.y2]));
+	for (const p of placed) { p.x1 = Math.round(p.x1 + ox); p.x2 = Math.round(p.x2 + ox); p.y1 = Math.round(p.y1 + oy); p.y2 = Math.round(p.y2 + oy); }
 	return parts;
+}
+// station names (N) above their stations: the boxes (B) and platforms (H) of the same name; moved further up (then down)
+// where another name, box or track is in the way. Used by the draft and after turning the drawing
+function placeLineNames(parts, boxes = null) {
+	const taken = boxes || parts.filter(p => "BHW".includes(p.t)).map(p => ({ x1: Math.min(p.x1, p.x2), x2: Math.max(p.x1, p.x2), y1: Math.min(p.y1, p.y2) - (p.t === "B" ? 3 : 0), y2: Math.max(p.y1, p.y2) }));
+	const free = (r) => !taken.some(b => r.x1 < b.x2 + 1 && r.x2 > b.x1 - 1 && r.y1 < b.y2 + 1 && r.y2 > b.y1 - 1);
+	const onTrack = (r) => parts.some(q => q.t === "T" && Math.min(q.x1, q.x2) <= r.x2 && Math.max(q.x1, q.x2) >= r.x1 && Math.min(q.y1, q.y2) <= r.y2 && Math.max(q.y1, q.y2) >= r.y1);
+	const stations = new Map();
+	for (const p of parts) if ((p.t === "B" || p.t === "H") && p.s) { if (!stations.has(p.s)) stations.set(p.s, []); stations.get(p.s).push(p); }
+	for (let i = parts.length - 1; i >= 0; i--) if (parts[i].t === "N" && stations.has(parts[i].s)) parts.splice(i, 1);
+	for (const [s, ps] of stations) {
+		const small = ps.every(p => p.t === "H");
+		const name = lineText({ s });
+		const x1 = Math.min(...ps.flatMap(p => [p.x1, p.x2])), x2 = Math.max(...ps.flatMap(p => [p.x1, p.x2])), y1 = Math.min(...ps.flatMap(p => [p.y1, p.y2]));
+		const cxm = Math.round((x1 + x2) / 2), y = y1 - (small ? 2 : 4);
+		const half = (name.length * (small ? .75 : 1.1) + 1) / 2;
+		const box = (yy) => ({ x1: cxm - half, x2: cxm + half, y1: yy - 1.5, y2: yy + 1.5 });
+		const tries = [0, -3, -6, -9, -12, -15, -18, -21, 3, 6, 9, 12].map(d => y + d);
+		const yy = tries.find(v => free(box(v)) && !onTrack(box(v))) ?? tries.find(v => free(box(v))) ?? y;
+		parts.push({ t: "N", x1: cxm, y1: yy, x2: cxm, y2: yy, b: [], s, f: small ? 1 : 0 });
+		taken.push(box(yy));
+	}
+	return parts;
+}
+// the drawing turned a quarter clockwise; windows stay lying, station names stay upright and go above their stations again
+function rotateLine(parts) {
+	const placed = parts.filter(p => p.t !== "Y");
+	const H = Math.max(...placed.flatMap(p => [p.y1, p.y2]));
+	for (const p of placed) {
+		if (p.t === "W") {
+			const cxm = (p.x1 + p.x2) / 2, cym = (p.y1 + p.y2) / 2, w = Math.abs(p.x2 - p.x1), h = Math.abs(p.y2 - p.y1);
+			const nx = H - cym, ny = cxm;
+			Object.assign(p, { x1: nx - w / 2, x2: nx + w / 2, y1: ny - h / 2, y2: ny + h / 2 });
+			continue;
+		}
+		const a = [H - p.y1, p.x1], b = [H - p.y2, p.x2];
+		if ("BHF".includes(p.t)) Object.assign(p, { x1: Math.min(a[0], b[0]), y1: Math.min(a[1], b[1]), x2: Math.max(a[0], b[0]), y2: Math.max(a[1], b[1]) });
+		else Object.assign(p, { x1: a[0], y1: a[1], x2: b[0], y2: b[1] });
+	}
+	placeLineNames(parts);
+	return normalizeLine(parts);
 }
 
 // ---------------------------------------------------------------------------
 // what moves on a line panel: occupied blocks, train numbers, routes
 // ---------------------------------------------------------------------------
 const key3 = (p) => p[0] + "," + p[1] + "," + p[2];
-// blocks: the track divided at the signals (a signal tile is a block of its own). Worked out once per set of tiles
+// blocks: the track divided at the signals and the points (a signal or a point tile is a block of its own), like the
+// track circuits of the TID: a train in the throat of a station shows on its own track only, not on the tracks the
+// points lead to. Worked out once per set of tiles
 let lineBlockCache = null;   // { tiles, map: "x,y,z" -> block }
 function lineBlocks(tiles) {
 	if (lineBlockCache && lineBlockCache.tiles === tiles) return lineBlockCache.map;
@@ -235,13 +297,14 @@ function lineBlocks(tiles) {
 	for (const t of tiles) { const k = t.p[0] + "," + t.p[1]; if (!byXY.has(k)) byXY.set(k, []); byXY.get(k).push(t); }
 	const up = new Map(tiles.map(t => [key3(t.p), key3(t.p)]));
 	const find = (k) => { while (up.get(k) !== k) { up.set(k, up.get(up.get(k))); k = up.get(k); } return k; };
+	const cut = (t) => !!t.s || DIRS.filter(d => t.r & d).length > 2;
 	for (const t of tiles) {
-		if (t.s) continue;
+		if (cut(t)) continue;
 		for (const d of DIRS) {
 			if (!(t.r & d)) continue;
 			// the next tile (one level up or down on a slope)
 			const n = (byXY.get((t.p[0] + DXY[d][0]) + "," + (t.p[1] + DXY[d][1])) || []).find(o => (o.r & BACK[d]) && Math.abs(o.p[2] - t.p[2]) <= 1);
-			if (n && !n.s) up.set(find(key3(t.p)), find(key3(n.p)));
+			if (n && !cut(n)) up.set(find(key3(t.p)), find(key3(n.p)));
 		}
 	}
 	const map = new Map();
@@ -255,7 +318,9 @@ const innerTiles = (p) => (p.b || []).length > 2 ? p.b.slice(1, -1) : (p.b || []
 // train number (as matched with the diagram, else the operation number of the game) and delay in whole minutes
 function lineTrainLabel(c, data) {
 	const id = identifyTrain(c, data);
-	return { convoy: c, number: id.number, op: id.op, red: id.red, cars: c.cars || 0, type: id.one?.type || "", destination: id.one ? id.one.stops[id.one.to]?.name || id.one.destination : "",
+	// the train number: given by hand or of the diagram; else the schedule's name; else the operation number
+	const number = id.tag?.number || id.one?.number || c.line || id.op;
+	return { convoy: c, number, text: lineLabelMode === "line" ? (c.line || id.op) : lineLabelMode === "name" ? c.name : number, op: id.op, red: id.red, cars: c.cars || 0, type: id.one?.type || "", destination: id.one ? id.one.stops[id.one.to]?.name || id.one.destination : "",
 		entry: id.one, delay: id.delay, minutes: id.delay.seconds >= 60 ? Math.floor(id.delay.seconds / 60) : 0 };
 }
 
@@ -298,13 +363,29 @@ function lineTrainPlaces(parts, data, label = lineTrainLabel) {
 	return places;
 }
 // lines red where a block of theirs has a train; the parts of lines that routes of the panel take
+// the stretches of the lines whose blocks have a train: [x1, y1, x2, y2] on the panel
 function lineOccupied(parts, data) {
-	const red = new Set();
-	if (!data?.tiles) return red;
+	const spans = [];
+	if (!data?.tiles) return spans;
 	const blocks = lineBlocks(data.tiles);
 	const taken = new Set((data.convoys || []).flatMap(c => c.occupied.map(p => blocks.get(key3(p)))));
-	parts.forEach((p, i) => { if (p.t === "T" && innerTiles(p).some(t => taken.has(blocks.get(key3(t))))) red.add(i); });
-	return red;
+	if (!taken.size) return spans;
+	for (const p of parts) {
+		if (p.t !== "T" || !p.b?.length) continue;
+		const n = p.b.length - 1, on = p.b.map(t => taken.has(blocks.get(key3(t))));
+		// the point at an end of a line: red with the line only (a train on the point is not on every track it leads to)
+		if (n > 0 && on[0] && !on[1]) on[0] = false;
+		if (n > 0 && on[n] && !on[n - 1]) on[n] = false;
+		for (let i = 0; i <= n; i++) {
+			if (!on[i]) continue;
+			let j = i;
+			while (j < n && on[j + 1]) j++;
+			const f1 = n ? Math.max(0, (i - .5) / n) : 0, f2 = n ? Math.min(1, (j + .5) / n) : 1;
+			spans.push([p.x1 + (p.x2 - p.x1) * f1, p.y1 + (p.y2 - p.y1) * f1, p.x1 + (p.x2 - p.x1) * f2, p.y1 + (p.y2 - p.y1) * f2]);
+			i = j;
+		}
+	}
+	return spans;
 }
 function lineRouteSpans(parts) {
 	const tiles = new Set((status.routes || []).filter(r => r.state !== "idle").flatMap(r => r.tiles.map(key3)));
@@ -337,13 +418,13 @@ function renderLineMap(svg, wrap, parts, data) {
 	const G = Math.max(3, Math.min(40, (fit || 10) * networkMapZoom));   // pixels per grid step
 	// the blue fills the frame even when the drawing is smaller
 	const SW = Math.max(GW * G, wrap.clientWidth - 2), SH = Math.max(GH * G, wrap.clientHeight - 2);
-	const redLines = lnEdit ? new Set() : lineOccupied(parts, data);
+	const redLines = lnEdit ? [] : lineOccupied(parts, data);
 	const places = lnEdit ? new Map() : lineTrainPlaces(parts, data);
 	const rules = lineRules(parts);
 	const spans = lnEdit ? [] : lineRouteSpans(parts);
 	// nothing changed but the time (not editing): only the clock is written again. A drawing made anew every
 	// time lost clicks on it and cost the browser for nothing
-	const sig = lnEdit ? null : JSON.stringify([lineDrawn.get(parts), SW, SH, G, [...redLines], [...places].map(([i, t]) => [i, t.number, t.minutes, lineNumberColor(rules, t)]), spans]);
+	const sig = lnEdit ? null : JSON.stringify([lineDrawn.get(parts), SW, SH, G, redLines, [...places].map(([i, t]) => [i, t.text, t.minutes, lineNumberColor(rules, t)]), spans]);
 	if (sig && sig === svg.dataset.sig) {
 		for (const t of svg.querySelectorAll(".lnclock")) t.textContent = data?.time || clockOf(status).hms;
 		return;
@@ -374,10 +455,9 @@ function renderLineMap(svg, wrap, parts, data) {
 	for (const i of idx) {
 		const p = parts[i];
 		if (p.t === "Y") continue;
-		const grp = el("g", { class: (lnEdit ? "lnpart" : "") + (lnEdit && lnEdit.sel === i ? " sel" : ""), "data-lnpart": i }, svg);
+		const grp = el("g", { class: (lnEdit ? "lnpart" : "") + (lnEdit && (lnEdit.sel === i || lnEdit.multi?.has(i)) ? " sel" : ""), "data-lnpart": i }, svg);
 		if (p.t === "T") {
-			const red = redLines.has(i);
-			const color = red ? "#ff3b30" : "#eef3ff";
+			const color = "#eef3ff";
 			el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: color, "stroke-width": Math.max(2, G * .32), "stroke-linecap": "square" }, grp);
 			// the small marks across the track, as on the TID
 			el("line", { x1: X(p.x1), y1: Y(p.y1), x2: X(p.x2), y2: Y(p.y2), stroke: color, "stroke-width": Math.max(4, G * .7), "stroke-dasharray": `1 ${Math.max(4, G * 1.2)}`, opacity: .8 }, grp);
@@ -398,7 +478,7 @@ function renderLineMap(svg, wrap, parts, data) {
 				el("line", { x1: dx, y1: r.y, x2: dx, y2: r.y + r.height, stroke: "#5d82ff", "stroke-width": 1 }, grp);
 				if (train) {
 					grp.setAttribute("class", (grp.getAttribute("class") || "") + " train");
-					digits(grp, train.number, r.x + (dx - r.x) / 2, r.y, dx - r.x - 2, r.height, color);
+					digits(grp, train.text, r.x + (dx - r.x) / 2, r.y, dx - r.x - 2, r.height, color);
 					if (train.minutes) digits(grp, train.minutes, dx + (r.x + r.width - dx) / 2, r.y, r.x + r.width - dx - 2, r.height, "#ff4040");
 				}
 			}
@@ -407,7 +487,7 @@ function renderLineMap(svg, wrap, parts, data) {
 				el("rect", { x: cxm - s / 2, y: sy, width: s, height: s, fill: "#0b2c99", stroke: "#5d82ff", "stroke-width": 1.2 }, grp);
 				if (train) {
 					grp.setAttribute("class", (grp.getAttribute("class") || "") + " train");
-					digits(grp, train.number, cxm, r.y, r.width - 4, r.height, color);
+					digits(grp, train.text, cxm, r.y, r.width - 4, r.height, color);
 					if (train.minutes) digits(grp, train.minutes, cxm, sy, s - 2, s, "#ff4040");
 				}
 			}
@@ -429,12 +509,21 @@ function renderLineMap(svg, wrap, parts, data) {
 		else if (p.t === "F") el("rect", Object.assign({ fill: "none", stroke: "#9db4ff", "stroke-width": 1.2, "stroke-dasharray": "6 4" }, rect(p)), grp);
 		else if (p.t === "C") el("text", { x: X(p.x1), y: Y(p.y1), "font-size": Math.max(9, G * 1.3), fill: "#ffffff", "font-family": "monospace", "text-anchor": "middle", "dominant-baseline": "middle", class: "lnclock" }, grp).textContent = data?.time || clockOf(status).hms;
 	}
-	// routes set on the panels of the stations
+	// the blocks with a train, and the routes set on the panels of the stations (red, over the tracks)
+	for (const [ax, ay, bx, by] of redLines) {
+		const og = el("g", { class: "lnoccupied", "pointer-events": "none" }, svg);
+		el("line", { x1: X(ax), y1: Y(ay), x2: X(bx), y2: Y(by), stroke: "#ff3b30", "stroke-width": Math.max(2, G * .32), "stroke-linecap": "butt" }, og);
+		el("line", { x1: X(ax), y1: Y(ay), x2: X(bx), y2: Y(by), stroke: "#ff3b30", "stroke-width": Math.max(4, G * .7), "stroke-dasharray": `1 ${Math.max(4, G * 1.2)}`, opacity: .8 }, og);
+	}
 	if (!lnEdit) for (const [ax, ay, bx, by] of spans)
 		el("line", { x1: X(ax), y1: Y(ay), x2: X(bx), y2: Y(by), stroke: "#ff3b30", "stroke-width": Math.max(2, G * .32), "stroke-linecap": "square", class: "lnroute", "pointer-events": "none" }, svg);
 	if (lnEdit && parts[lnEdit.sel] && "TWBHF".includes(parts[lnEdit.sel].t)) {
 		const p = parts[lnEdit.sel];
 		for (const [x, y, h] of [[p.x1, p.y1, 1], [p.x2, p.y2, 2]]) el("rect", { x: X(x) - 5, y: Y(y) - 5, width: 10, height: 10, fill: "#ffe066", stroke: "#000", class: "lnhandle", "data-h": h }, svg);
+	}
+	if (lnEdit && lnEdit.rubber) {
+		const r = lnEdit.rubber;
+		el("rect", { x: X(Math.min(r.from[0], r.to[0])), y: Y(Math.min(r.from[1], r.to[1])), width: Math.abs(X(r.to[0] - r.from[0])), height: Math.abs(Y(r.to[1] - r.from[1])), fill: "rgba(255,224,102,.12)", stroke: "#ffe066", "stroke-dasharray": "6 4", "pointer-events": "none" }, svg);
 	}
 	if (lnEdit && lnEdit.drawing) {
 		const d = lnEdit.drawing;
@@ -476,12 +565,17 @@ function lineBarHtml(ln) {
 			`<button data-ln="clock">時計</button><button data-ln="colors" title="列番の色の決め方（両数・種別・列番・運用番号ごと）">色分け</button><span class="sep"></span>` +
 			(sel && sel.t === "B" ? `<button data-ln="flip" title="遅延表示の箱を上下入れ替える">遅延の箱を${sel.f & 1 ? "上" : "下"}へ</button>` : "") +
 			(sel && sel.t === "N" ? `<button data-ln="small" title="大きな駅名（枠つき）と小さな駅名を切り替える">${sel.f & 1 ? "大きな駅名に" : "小さな駅名に"}</button>` : "") +
-			`<button data-ln="del" ${sel ? "" : "disabled"} title="選んだ部品を消す（Delete キー）">削除</button>` +
+			tool("R", "範囲で選ぶ", "押してから盤の上をドラッグして囲む。囲んだ部品をまとめて消す（Delete）・動かす（ドラッグ、矢印キー）") +
+			`<button data-ln="rotate" title="図を右へ 90° 回す（駅名は駅の上に置き直す）">回転</button>` +
+			`<button data-ln="del" ${sel || lnEdit.multi?.size ? "" : "disabled"} title="選んだ部品を消す（Delete キー）">削除${lnEdit.multi?.size ? `（${lnEdit.multi.size}個）` : ""}</button>` +
 			`<button data-ln="undo" ${lnEdit.undo.length ? "" : "disabled"} title="元に戻す（Ctrl+Z）">↶ 戻す</button><button data-ln="redo" ${lnEdit.redo.length ? "" : "disabled"} title="やり直す（Ctrl+Y）">↷</button>` +
 			`<button data-ln="draft" title="線路から下書きを作り直す（編集した内容は消えます）">下書きを作り直す</button>` +
 			`<button data-ln="apply" class="primary" title="ゲームに保存して全員の盤に反映する">適用</button><button data-ln="cancel">やめる</button>`;
 	}
-	const tabs = `<button data-ln="view" data-id="map" class="${!ln ? "on" : ""}" title="ゲームの線路をそのまま描いた地図">地図</button>` +
+	if (lnPick) return `<span class="cpedit">路線盤「${esc(lnPick.name)}」の範囲：地図の上をドラッグして囲んでください</span>` +
+		`<button data-ln="pickall" title="今つながっている線路を全部使う">全部で作る</button><button data-ln="pickcancel">やめる</button>`;
+	const tabs = `<select data-ln="label" title="窓に出すもの（このブラウザだけ）"><option value="number" ${lineLabelMode === "number" ? "selected" : ""}>列番表示</option><option value="line" ${lineLabelMode === "line" ? "selected" : ""}>スケジュール名表示</option><option value="name" ${lineLabelMode === "name" ? "selected" : ""}>編成名表示</option></select>` +
+		`<button data-ln="view" data-id="map" class="${!ln ? "on" : ""}" title="ゲームの線路をそのまま描いた地図">地図</button>` +
 		linesOf().map(x => `<button data-ln="view" data-id="${x.id}" class="${ln && ln.id === x.id ? "on" : ""}">${esc(lineName(x))}</button>`).join("");
 	const tools = `<span class="sep"></span><button data-ln="new" title="今つながっている線路から下書きを作り、路線盤を作る">＋路線盤</button>` +
 		(ln ? `<button data-ln="edit">盤を編集</button><button data-ln="rename">名前を変える</button><button data-ln="remove">削除</button>` +
@@ -570,6 +664,14 @@ function bindLineEditor(svg, G) {
 		const h = e.target.closest(".lnhandle"), pt = e.target.closest("[data-lnpart]");
 		const at = toGrid(e);
 		if (lnEdit.tool === "T") { lnEdit.drawing = { from: at, to: at }; e.preventDefault(); return; }
+		if (lnEdit.tool === "R") { lnEdit.rubber = { from: at, to: at }; lnEdit.multi = null; e.preventDefault(); return; }
+		// pressed on one of several parts chosen together: they move together
+		if (pt && lnEdit.multi?.has(Number(pt.dataset.lnpart))) {
+			lnEdit.drag = { which: 0, from: at, many: [...lnEdit.multi].map(i => [i, Object.assign({}, lnEdit.parts[i])]) };
+			e.preventDefault();
+			return;
+		}
+		lnEdit.multi = null;
 		if (lnEdit.tool) {
 			const t = lnEdit.tool, [x, y] = at;
 			let p = null;
@@ -599,11 +701,19 @@ function bindLineEditor(svg, G) {
 	svg.onmousemove = (e) => {
 		if (!lnEdit) return;
 		const at = toGrid(e);
-		if (lnEdit.drawing) {
-			if (at[0] !== lnEdit.drawing.to[0] || at[1] !== lnEdit.drawing.to[1]) { lnEdit.drawing.to = at; renderNetwork(); }
+		if (lnEdit.drawing || lnEdit.rubber) {
+			const r = lnEdit.drawing || lnEdit.rubber;
+			if (at[0] !== r.to[0] || at[1] !== r.to[1]) { r.to = at; renderNetwork(); }
 			return;
 		}
 		const d = lnEdit.drag;
+		if (d && d.many) {
+			const dx = at[0] - d.from[0], dy = at[1] - d.from[1];
+			for (const [i, o] of d.many) Object.assign(lnEdit.parts[i], { x1: o.x1 + dx, x2: o.x2 + dx, y1: o.y1 + dy, y2: o.y2 + dy });
+			if (dx || dy) { lnEdit.dirty = true; d.moved = true; }
+			renderNetwork();
+			return;
+		}
 		if (!d || lnEdit.sel < 0) return;
 		const dx = at[0] - d.from[0], dy = at[1] - d.from[1];
 		const p = lnEdit.parts[lnEdit.sel], o = d.orig;
@@ -616,6 +726,15 @@ function bindLineEditor(svg, G) {
 	};
 	svg.onmouseup = () => {
 		if (!lnEdit) return;
+		if (lnEdit.rubber) {
+			// the parts that lie in the rectangle (wholly or partly)
+			const r = lnEdit.rubber, rx1 = Math.min(r.from[0], r.to[0]), rx2 = Math.max(r.from[0], r.to[0]), ry1 = Math.min(r.from[1], r.to[1]), ry2 = Math.max(r.from[1], r.to[1]);
+			lnEdit.rubber = null; lnEdit.tool = null; lnEdit.sel = -1;
+			const inside = lnEdit.parts.map((p, i) => p.t !== "Y" && Math.min(p.x1, p.x2) <= rx2 && Math.max(p.x1, p.x2) >= rx1 && Math.min(p.y1, p.y2) <= ry2 && Math.max(p.y1, p.y2) >= ry1 ? i : -1).filter(i => i >= 0);
+			lnEdit.multi = inside.length ? new Set(inside) : null;
+			renderNetwork();
+			return;
+		}
 		if (lnEdit.drawing) {
 			const d = lnEdit.drawing;
 			lnEdit.drawing = null;
@@ -645,14 +764,80 @@ document.addEventListener("keydown", (e) => {
 	if (!lnEdit || (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) return;
 	if ((e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase())) { lnUndo(e.key.toLowerCase() === "y" || e.shiftKey); e.preventDefault(); return; }
 	if (e.key === "Escape" && (lnEdit.tool || lnEdit.drawing)) { lnEdit.tool = null; lnEdit.drawing = null; renderNetwork(); return; }
-	if (lnEdit.sel < 0) return;
-	if (e.key === "Delete" || e.key === "Backspace") { lnEdit.parts.splice(lnEdit.sel, 1); lnEdit.sel = -1; lnEdit.dirty = true; renderNetwork(); e.preventDefault(); return; }
+	if (lnEdit.sel < 0 && !lnEdit.multi?.size) return;
+	if (e.key === "Delete" || e.key === "Backspace") { lnDeleteSelected(); renderNetwork(); e.preventDefault(); return; }
 	const mv = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
 	if (mv) {
-		const p = lnEdit.parts[lnEdit.sel];
-		p.x1 = Math.max(0, p.x1 + mv[0]); p.x2 = Math.max(0, p.x2 + mv[0]); p.y1 = Math.max(0, p.y1 + mv[1]); p.y2 = Math.max(0, p.y2 + mv[1]);
+		for (const i of lnEdit.multi?.size ? lnEdit.multi : [lnEdit.sel]) {
+			const p = lnEdit.parts[i];
+			p.x1 = Math.max(0, p.x1 + mv[0]); p.x2 = Math.max(0, p.x2 + mv[0]); p.y1 = Math.max(0, p.y1 + mv[1]); p.y2 = Math.max(0, p.y2 + mv[1]);
+		}
 		lnEdit.dirty = true; renderNetwork(); e.preventDefault();
 	}
+});
+
+// the chosen part, or the parts chosen together, deleted
+function lnDeleteSelected() {
+	if (!lnEdit) return;
+	const gone = lnEdit.multi?.size ? [...lnEdit.multi] : lnEdit.sel >= 0 ? [lnEdit.sel] : [];
+	for (const i of gone.sort((a, b) => b - a)) lnEdit.parts.splice(i, 1);
+	lnEdit.sel = -1; lnEdit.multi = null;
+	if (gone.length) lnEdit.dirty = true;
+}
+// a new line panel from a draft of the tracks given
+async function createLine(name, data) {
+	const parts = makeLineDraft(data);
+	if (!parts.some(p => p.t === "T")) { toast("その範囲に線路がありません", true); renderNetwork(); return; }
+	const r = await commandResult(`ln_new,${encodeURIComponent(name)}`);
+	if (!r.ok) { toast("路線盤を作れませんでした: " + tr(r.error), true); renderNetwork(); return; }
+	await refreshStatus();
+	const made = linesOf().filter(x => x.name === encodeURIComponent(name)).sort((a, b) => b.id - a.id)[0];
+	if (!made) return;
+	startLineEdit(made, parts);
+	lnEdit.dirty = true;
+	toast("線路から下書きを作りました。整えてから「適用」してください");
+}
+// the range of a new line panel: a rectangle dragged on the map of the game
+(function () {
+	const wrap = document.getElementById("networkMapWrap"), svg = document.getElementById("networkMap");
+	if (!wrap || !svg) return;
+	let box = null, from = null;
+	const tileAt = (e) => {
+		const m = networkMapRendered;
+		if (!m || m.unit === undefined) return null;
+		const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+		const v = pt.matrixTransform(svg.getScreenCTM().inverse());
+		return [v.x / m.unit - 1.5 + m.x1, v.y / m.unit - 1.5 + m.y1];
+	};
+	const place = (a, b) => {
+		const r = wrap.getBoundingClientRect();
+		Object.assign(box.style, { left: Math.min(a.x, b.x) - r.left + wrap.scrollLeft + "px", top: Math.min(a.y, b.y) - r.top + wrap.scrollTop + "px", width: Math.abs(a.x - b.x) + "px", height: Math.abs(a.y - b.y) + "px" });
+	};
+	wrap.addEventListener("mousedown", (e) => {
+		if (!lnPick) return;
+		from = { x: e.clientX, y: e.clientY, tile: tileAt(e) };
+		if (!box) { box = document.createElement("div"); box.id = "linePickBox"; wrap.appendChild(box); }
+		box.hidden = false;
+		place(from, from);
+		e.preventDefault();
+	});
+	wrap.addEventListener("mousemove", (e) => { if (lnPick && from) place(from, { x: e.clientX, y: e.clientY }); });
+	wrap.addEventListener("mouseup", (e) => {
+		if (!lnPick || !from) return;
+		const a = from.tile, b = tileAt(e);
+		from = null; box.hidden = true;
+		if (!a || !b || Math.abs(a[0] - b[0]) < 1 || Math.abs(a[1] - b[1]) < 1) return;
+		const x1 = Math.min(a[0], b[0]), x2 = Math.max(a[0], b[0]), y1 = Math.min(a[1], b[1]), y2 = Math.max(a[1], b[1]);
+		const name = lnPick.name;
+		lnPick = null;
+		createLine(name, Object.assign({}, network, { tiles: network.tiles.filter(t => t.p[0] >= x1 && t.p[0] <= x2 && t.p[1] >= y1 && t.p[1] <= y2) }));
+	});
+})();
+document.getElementById("lineBar").addEventListener("change", (e) => {
+	if (e.target.dataset.ln !== "label") return;
+	lineLabelMode = e.target.value;
+	localStore("line.label", lineLabelMode);
+	renderNetwork();
 });
 
 function startLineEdit(ln, parts) {
@@ -683,16 +868,14 @@ document.getElementById("lineBar").addEventListener("click", async (e) => {
 		if (!network?.tiles?.length) { toast("線路の情報を取得中です。しばらくしてからもう一度押してください", true); return; }
 		const name = prompt("路線盤の名前（例：京王線）", "");
 		if (!name) return;
-		const parts = makeLineDraft(network);
-		const r = await commandResult(`ln_new,${encodeURIComponent(name)}`);
-		if (!r.ok) { toast("路線盤を作れませんでした: " + tr(r.error), true); return; }
-		await refreshStatus();
-		const made = linesOf().filter(x => x.name === encodeURIComponent(name)).sort((a, b) => b.id - a.id)[0];
-		if (!made) return;
-		startLineEdit(made, parts);
-		lnEdit.dirty = true;
-		toast("線路から下書きを作りました。整えてから「適用」してください");
+		// the range: dragged on the map, or all the connected tracks
+		lnPick = { name };
+		lineView = "map";
+		renderNetwork();
 	}
+	else if (c === "pickall" && lnPick) { const name = lnPick.name; lnPick = null; createLine(name, network); }
+	else if (c === "pickcancel") { lnPick = null; renderNetwork(); }
+	else if (c === "label") return;
 	else if (c === "edit" && ln) { const parts = lineParts(ln); if (parts) startLineEdit(ln, parts); }
 	else if (c === "rename" && ln) {
 		const name = prompt("路線盤の名前", lineName(ln));
@@ -712,8 +895,9 @@ document.getElementById("lineBar").addEventListener("click", async (e) => {
 	else if (c === "tool") { lnEdit.tool = lnEdit.tool === b.dataset.t ? null : b.dataset.t; renderNetwork(); }
 	else if (c === "clock") { lnEdit.parts.push({ t: "C", x1: 8, y1: 2, x2: 8, y2: 2, b: [], s: "", f: 0 }); lnEdit.sel = lnEdit.parts.length - 1; lnEdit.dirty = true; renderNetwork(); }
 	else if (c === "colors") { editLineColors(); return; }
+	else if (c === "rotate") { lnEdit.parts = rotateLine(lnEdit.parts); lnEdit.sel = -1; lnEdit.multi = null; lnEdit.dirty = true; renderNetwork(); }
 	else if (c === "flip" || c === "small") { const p = lnEdit.parts[lnEdit.sel]; if (p) { p.f = (p.f || 0) ^ 1; lnEdit.dirty = true; renderNetwork(); } }
-	else if (c === "del" && lnEdit.sel >= 0) { lnEdit.parts.splice(lnEdit.sel, 1); lnEdit.sel = -1; lnEdit.dirty = true; renderNetwork(); }
+	else if (c === "del" && (lnEdit.sel >= 0 || lnEdit.multi?.size)) { lnDeleteSelected(); renderNetwork(); }
 	else if (c === "undo" || c === "redo") lnUndo(c === "redo");
 	else if (c === "draft") {
 		if (!confirm("線路から下書きを作り直しますか？編集した内容は消えます。")) return;
@@ -755,7 +939,7 @@ function openTrainDetail(t) {
 	const m = lineModal(`<div class="lnhead"><b>列番：${esc(t.number)}</b><button data-x="close">×</button></div>
 		<p><b>${t.cars ? t.cars + "両編成" : ""}</b>　<b class="${t.minutes ? "late" : ""}">${delay}</b></p>
 		<p>${t.type ? `<span class="lntype">${esc(t.type)}</span>　` : ""}${t.destination ? esc(displayStationName(t.destination)) + "　行き" : ""}</p>
-		<p class="hint">ゲームの列車：${esc(c.name)}（運用番号 ${esc(t.op)}）${t.entry ? "" : "／ダイヤの列車は特定できていません"}</p>
+		<p class="hint">ゲームの列車：${esc(c.name)}（運用番号 ${esc(t.op)}）${c.line ? `／スケジュール：${esc(c.line)}` : ""}${t.entry ? "" : "／ダイヤの列車は特定できていません"}</p>
 		${stops.length ? `<table class="lntable"><tr><th>駅</th><th>到着時刻</th><th>発車時刻</th></tr>${stops.map(s => `<tr><td>${esc(displayStationName(s.name))}</td><td>${s.arrival == null ? "—" : hhmm(s.arrival)}</td><td>${s.departure == null ? "—" : hhmm(s.departure)}</td></tr>`).join("")}</table>` : ""}
 		<h3>手で付け直す（全員の盤に反映、ゲームに保存）</h3>
 		<p class="hint">ダイヤと合わない列車に。ゲームの列車名「${esc(c.name)}」に結びつきます（同じ名前の列車も同じになります）。</p>

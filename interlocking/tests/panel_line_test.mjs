@@ -1,5 +1,7 @@
 // Web panel: line panels (路線盤) in the view of all trains (全区間在線), scenario il-via
-//   1. a line panel made from a draft of the tracks: lines, a station, train number windows, the clock
+//   0. the range of a new line panel dragged on the map: the draft has only the tracks in it
+//   1. a line panel made from a draft of the tracks: lines, a station, train number windows, the clock; turning,
+//      choosing several parts with a rectangle
 //   2. applied: in the game, shown to a second browser (drawn in blue)
 //   3. edited: a part moved and applied; colour rules; renamed; deleted
 //
@@ -40,9 +42,28 @@ try {
 	await page.evaluate(() => { const h = halts.find(x => x.tiles.some(t => t.join(",") === "13,5,0")); setArea(station().id, Object.assign(boxAround(h.tiles.concat([[3, 5, 0], [4, 7, 0]]), 2), { halt: h.id })); });
 	await page.waitForFunction(() => network && network.tiles && network.tiles.length > 10, null, { timeout: 15000 });
 
+	console.log("[0] the range of a line panel chosen on the map");
+	page.once("dialog", d => d.accept("範囲"));
+	await page.click("#lineBar button[data-ln=new]");
+	await page.waitForSelector("#lineBar button[data-ln=pickall]");
+	check(await page.locator("#networkMapWrap").isVisible(), "the map is shown to choose the range on");
+	// drag over the tiles x 2..9, y 4..6 (the main track west of the platform, not the loop below)
+	const screen = (x, y) => page.evaluate(([x, y]) => { const m = networkMapRendered, svg = document.getElementById("networkMap"), pt = svg.createSVGPoint();
+		pt.x = (x - m.x1 + 1.5) * m.unit; pt.y = (y - m.y1 + 1.5) * m.unit; const q = pt.matrixTransform(svg.getScreenCTM()); return [q.x, q.y]; }, [x, y]);
+	const [ax, ay] = await screen(1.6, 4.4), [bx, by] = await screen(9.4, 5.6);
+	await page.mouse.move(ax, ay); await page.mouse.down(); await page.mouse.move((ax + bx) / 2, (ay + by) / 2); await page.mouse.move(bx, by); await page.mouse.up();
+	await page.waitForFunction(() => lnEdit && lnEdit.parts.length > 0, null, { timeout: 10000 });
+	const inRange = await page.evaluate(() => lnEdit.parts.filter(p => p.t === "T").flatMap(p => p.b).every(t => t[0] >= 2 && t[0] <= 9 && t[1] >= 4 && t[1] <= 6));
+	check(inRange && await page.evaluate(() => lnEdit.parts.some(p => p.t === "T")), "the draft has only the tracks in the range");
+	page.once("dialog", d => d.accept());
+	await page.click("#lineBar button[data-ln=cancel]");
+	await cmd(`ln_del,${(await st()).lines[0].id}`);
+	await waitFor(async () => !(await st()).lines.length, 5000, "range test panel removed");
+
 	console.log("[1] a line panel from a draft of the tracks");
 	page.once("dialog", d => d.accept("京王線"));
 	await page.click("#lineBar button[data-ln=new]");
+	await page.click("#lineBar button[data-ln=pickall]");
 	await page.waitForFunction(() => lnEdit && lnEdit.parts.length > 0, null, { timeout: 10000 });
 	const types = await page.evaluate(() => lnEdit.parts.map(p => p.t));
 	const count = (t) => types.filter(x => x === t).length;
@@ -53,6 +74,21 @@ try {
 	check(await page.evaluate(() => { const ts = lnEdit.parts.filter(p => p.t === "T"); return Math.max(...ts.flatMap(p => [p.x1, p.x2])) - Math.min(...ts.flatMap(p => [p.x1, p.x2])); }) < 2 * 16,
 		"long plain stretches are shortened");
 	check(await page.locator("#lineMap line").count() > 4 && await page.locator("#lineWrap").isVisible() && !(await page.locator("#networkMapWrap").isVisible()), "the draft is drawn instead of the map");
+	// choose several parts with a rectangle, turn the drawing and back (four turns), undo the deletion of the chosen ones
+	const before = await page.evaluate(() => JSON.stringify(lnEdit.parts.filter(p => p.t === "T").map(p => p.b)));
+	await page.click("#lineBar button[data-ln=rotate]");
+	const turned = await page.evaluate(() => lnEdit.parts.filter(p => p.t === "W").every(w => Math.abs(w.x2 - w.x1) > Math.abs(w.y2 - w.y1)));
+	for (let i = 0; i < 3; i++) await page.click("#lineBar button[data-ln=rotate]");
+	check(turned && await page.evaluate(() => JSON.stringify(lnEdit.parts.filter(p => p.t === "T").map(p => p.b))) === before, "回転: windows stay lying; four turns keep every line and its tiles");
+	await page.click("#lineBar button[data-ln=tool][data-t=R]");
+	const box = await page.locator("#lineMap").boundingBox();
+	await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down(); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.move(box.x + box.width - 5, box.y + box.height - 5); await page.mouse.up();
+	const chosen = await page.evaluate(() => lnEdit.multi?.size || 0), all = await page.evaluate(() => lnEdit.parts.length);
+	check(chosen >= all - 1, `範囲で選ぶ: the parts in the rectangle chosen (${chosen} of ${all})`);
+	await page.keyboard.press("Delete");
+	check(await page.evaluate(() => lnEdit.parts.length) === all - chosen, "deleted together");
+	await page.keyboard.press("Control+z");
+	check(await page.evaluate(() => lnEdit.parts.length) === all, "and back (Ctrl+Z)");
 	if (shots) await page.screenshot({ path: path.join(shots, "line_1_draft.png") });
 
 	console.log("[2] applied");

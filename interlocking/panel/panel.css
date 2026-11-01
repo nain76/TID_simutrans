@@ -269,3 +269,6 @@ body.network-mode #networkTrains { max-height: none; }
 #lnModal .hint { color: #555; }
 #lnModal h3 { font-size: 14px; margin: 14px 0 4px; }
 #lnModal input:not([type=checkbox]):not([type=color]) { width: 8em; }
+#networkMapWrap { position: relative; }
+#linePickBox { position: absolute; border: 2px dashed #ffe066; background: rgba(255,224,102,.15); pointer-events: none; }
+#linePickBox[hidden] { display: none; }

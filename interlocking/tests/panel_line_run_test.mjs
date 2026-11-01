@@ -54,6 +54,7 @@ try {
 	await page.waitForFunction(() => network && network.tiles && network.tiles.length > 5, null, { timeout: 15000 });
 	page.once("dialog", d => d.accept("試験線"));
 	await page.click("#lineBar button[data-ln=new]");
+	await page.click("#lineBar button[data-ln=pickall]");
 	await page.waitForFunction(() => lnEdit && lnEdit.parts.length > 0, null, { timeout: 10000 });
 	await page.click("#lineBar button[data-ln=apply]");
 	await page.waitForFunction(() => !lnEdit && document.querySelectorAll("#lineMap line").length > 3, null, { timeout: 10000 });
@@ -82,6 +83,14 @@ try {
 	await page.waitForFunction(() => [...document.querySelectorAll("#lineMap .train")].some(g => lnPartsShown()[Number(g.dataset.lnpart)]?.t === "B"), null, { timeout: 90000 }).catch(() => {});
 	check(await page.evaluate(() => [...document.querySelectorAll("#lineMap .train")].some(g => lnPartsShown()[Number(g.dataset.lnpart)]?.t === "B")), "at the station: in the number box of its track");
 	if (shots) await page.screenshot({ path: path.join(shots, "line_run_3_station.png") });
+
+	// what the windows show: the name of the train, of its schedule (none here: the operation number), the train number
+	await page.selectOption("#lineBar select[data-ln=label]", "name");
+	await page.waitForFunction((n) => [...document.querySelectorAll("#lineMap .train text")].some(t => t.textContent === n), name, { timeout: 8000 });
+	check(true, "編成名表示: the name of the train");
+	await page.selectOption("#lineBar select[data-ln=label]", "number");
+	await page.waitForFunction((n) => [...document.querySelectorAll("#lineMap .train text")].some(t => t.textContent === n), number, { timeout: 8000 });
+	check(true, "列番表示 again");
 
 	console.log("[2b] the details of a train, numbers given by hand");
 	await page.locator("#lineMap .train text").first().click();

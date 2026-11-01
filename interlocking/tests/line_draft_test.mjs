@@ -27,6 +27,8 @@ put(140, 20, 4); vline(140, 20, 22);
 // a branch going north at x = 250, then east, with a station at its end
 put(250, 20, 1); vline(250, 2, 20); put(250, 2, 2); hline(250, 320, 2);
 for (let x = 310; x <= 318; x++) put(x, 2, 0, { halt: "終点" });
+// a diagonal going south-east from the end of the lower track (stairs of curves), with signals on it
+{ let x = 300, y = 22; put(300, 22, 4 | 8); for (let i = 0; i < 30; i++) { put(x, y + 1, 1 | 2); put(x + 1, y + 1, 8 | 4); x++; y++; if (i % 10 === 5) tiles.get(x + "," + y).s = { dir: 4, aspect: "red", name: "閉塞" }; } put(x, y + 1, 1); }
 // signals on the main tracks
 put(60, 20, 0, { s: { dir: 2, aspect: "red", name: "閉塞" } }); put(60, 22, 0, { s: { dir: 8, aspect: "red", name: "閉塞" } });
 put(120, 20, 0, { s: { dir: 2, aspect: "red", name: "閉塞" } }); put(120, 22, 0, { s: { dir: 8, aspect: "red", name: "閉塞" } });
@@ -81,13 +83,21 @@ context.parts = parts;
 context.label = (c) => ({ number: c.name, minutes: c.id === 2 ? 3 : 0 });
 const places = run2("[...lineTrainPlaces(parts, moving, label)].map(([i, l]) => [parts[i].t, parts[i].f, l.number, l.minutes, parts[i].b.map(t => t.join(','))])");
 const placed = (n) => places.find(p => p[2] === n);
-assert.ok(placed("東行き") && placed("東行き")[0] === "W" && placed("東行き")[1] === 2 && placed("東行き")[4].includes("61,20,0"), `the eastbound train in the window of its block (${JSON.stringify(placed("東行き"))})`);
+assert.ok(placed("東行き") && placed("東行き")[0] === "W" && placed("東行き")[1] === 2 && placed("東行き")[4].every(k => { const [x, y] = k.split(",").map(Number); return y === 20 && x > 60 && x < 120; }), `the eastbound train in the window of its block (${JSON.stringify(placed("東行き"))})`);
 assert.ok(placed("西行き") && placed("西行き")[0] === "W" && placed("西行き")[1] === 8 && placed("西行き")[3] === 3, "the westbound train in the window below, with its delay");
 assert.ok(placed("大駅停車") && placed("大駅停車")[0] === "B" && placed("大駅停車")[4].includes("160,22,0"), "the train at the station in the number box of its track");
 assert.ok(!placed("逆走") || placed("逆走")[1] === 0, "a train going the other way: not in the windows of the eastbound track (a single track window, both ways, may show it)");
-const red = run2("[...lineOccupied(parts, moving)].map(i => parts[i].b.map(t => t.join(',')))");
-assert.ok(red.some(b => b.includes("90,20,0")) && red.some(b => b.includes("61,20,0")), "the whole block of the eastbound train is red (60 to 120)");
-assert.ok(!red.some(b => b.includes("50,20,0")), "the block behind the signal at 60 is not red");
+// where a tile is drawn on the panel, and whether a red stretch covers it
+const gridOf = (k) => { const p = of("T").find(q => q.b.some(t => t.join(",") === k)); const i = p.b.findIndex(t => t.join(",") === k), f = p.b.length > 1 ? i / (p.b.length - 1) : 0; return [p.x1 + (p.x2 - p.x1) * f, p.y1 + (p.y2 - p.y1) * f]; };
+const covers = (spans, k) => { const [x, y] = gridOf(k); return spans.some(([ax, ay, bx, by]) => Math.abs((bx - ax) * (y - ay) - (by - ay) * (x - ax)) < 1e-6 && x >= Math.min(ax, bx) - 1e-6 && x <= Math.max(ax, bx) + 1e-6 && y >= Math.min(ay, by) - 1e-6 && y <= Math.max(ay, by) + 1e-6); };
+const red = run2("lineOccupied(parts, moving)");
+assert.ok(covers(red, "90,20,0") && covers(red, "61,20,0") && covers(red, "119,20,0"), "the whole block of the eastbound train is red (60 to 120)");
+assert.ok(!covers(red, "50,20,0") && !covers(red, "130,20,0"), "the blocks behind the signal at 60 and beyond the one at 120 are not red");
+// the throat of the big station: a train on the main track by the point at 150 does not make the third track red
+context.throat = Object.assign({}, data, { seconds: 0, convoys: [train(5, [[152, 22, 0], [151, 22, 0]], 2, "構内")] });
+const red2 = run2("lineOccupied(parts, throat)");
+assert.ok(covers(red2, "152,22,0"), "the train's own track is red");
+assert.ok(!covers(red2, "150,23,0") && !covers(red2, "152,24,0"), "the track the point leads to is not (blocks end at points, like track circuits)");
 run("status.routes = [{ state: 'set', tiles: [[152, 24, 0], [153, 24, 0], [154, 24, 0], [155, 24, 0]] }, { state: 'idle', tiles: [[10, 20, 0], [11, 20, 0]] }]");
 const spans = run2("lineRouteSpans(parts)");
 const third = of("T").find(p => p.b.some(t => t.join(",") === "153,24,0"));
@@ -106,6 +116,21 @@ assert.equal(color({ cars: 6, number: "201", op: "A01" }), "#ffb31a", "none fits
 assert.equal(color({ cars: 10, number: "201", red: true }), "#ff4040", "marked red by hand wins");
 assert.equal(run("lineRules([]).length"), 0, "no style part: no rules");
 
+// 7. the diagonal: one straight slanting line (not stairs), though signals stand on it
+const diag = of("T").filter(p => p.b.some(t => t[0] > 302 && t[1] > 24));
+assert.ok(diag.length <= 6 && diag.filter(p => p.x1 === p.x2 || p.y1 === p.y2).length <= 1, `the diagonal is ${diag.length} slanting lines, not stairs (no small steps across)`);
+// 8. turning the drawing: windows stay lying, names upright above their stations
+context.turned = JSON.parse(JSON.stringify(parts));
+const t2 = run2("rotateLine(turned)");
+const w2 = t2.filter(p => p.t === "W");
+assert.ok(w2.length === of("W").length && w2.every(w => Math.abs(w.x2 - w.x1) > Math.abs(w.y2 - w.y1)), "the windows stay lying after turning");
+for (const nm of t2.filter(p => p.t === "N")) {
+	const st = t2.filter(p => (p.t === "B" || p.t === "H") && p.s === nm.s);
+	if (st.length) assert.ok(nm.y1 <= Math.min(...st.flatMap(p => [p.y1, p.y2])), `the name ${decodeURIComponent(nm.s)} above its station after turning`);
+}
+const tt = t2.filter(p => p.t === "T"), t0 = of("T");
+assert.ok(Math.max(...tt.flatMap(p => [p.y1, p.y2])) - Math.min(...tt.flatMap(p => [p.y1, p.y2])) === Math.max(...t0.flatMap(p => [p.x1, p.x2])) - Math.min(...t0.flatMap(p => [p.x1, p.x2])), "turned a quarter: the width became the height");
+
 if (process.argv[2]) {
 	// the draft drawn roughly, to look at
 	const S = 10, mx = Math.max(...parts.flatMap(p => [p.x1, p.x2])) + 20, my = Math.max(...parts.flatMap(p => [p.y1, p.y2])) + 6;
@@ -119,4 +144,4 @@ if (process.argv[2]) {
 	}
 	fs.writeFileSync(process.argv[2], out.join("") + "</svg>");
 }
-console.log(`PASS: line panel draft: shortened, stations (boxes / platform marks / names), windows by side and direction, branch, clock; blocks, train numbers in windows / boxes by direction, routes, colour rules (${parts.length} parts)`);
+console.log(`PASS: line panel draft: shortened, stations (boxes / platform marks / names), windows by side and direction, branch, clock; blocks, train numbers in windows / boxes by direction, routes, colour rules, a diagonal as one line, turning (${parts.length} parts)`);

@@ -14,6 +14,7 @@
 #include "../simworld.h"
 #include "../simhalt.h"
 #include "../simconvoi.h"
+#include "../simline.h"
 #include "../boden/grund.h"
 #include "../boden/wege/schiene.h"
 #include "../obj/signal.h"
@@ -272,6 +273,10 @@ void il_query::get_network_json(cbuffer_t &buf, koord3d seed, bool with_tiles)
 		// the direction the head of the train goes (for the train number windows of a line panel)
 		buf.printf(",\"dir\":%u", (unsigned)c->front()->get_direction());
 		buf.printf(",\"cars\":%u", (unsigned)c->get_vehicle_count());
+		// the name of its schedule (line) in the game, if it runs on one
+		if(  c->get_line().is_bound()  ) {
+			buf.append(",\"line\":"); append_json_string(buf, c->get_line()->get_name());
+		}
 		const grund_t *g = welt->lookup(occupied[0]);
 		buf.append(",\"halt\":");
 		append_json_string(buf, g && g->get_halt().is_bound() ? g->get_halt()->get_name() : "");

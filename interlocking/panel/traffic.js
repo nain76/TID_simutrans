@@ -508,6 +508,7 @@ function renderNetworkMap(data) {
 	let x1 = Infinity, x2 = -Infinity, y1 = Infinity, y2 = -Infinity;
 	for (const t of tiles) { x1 = Math.min(x1, t.p[0]); x2 = Math.max(x2, t.p[0]); y1 = Math.min(y1, t.p[1]); y2 = Math.max(y2, t.p[1]); }
 	const unit = 24, width = (x2 - x1 + 3) * unit, height = (y2 - y1 + 3) * unit;
+	Object.assign(networkMapRendered, { x1, y1, unit });   // for choosing a range on the map (line panels)
 	const fit = Math.min(Math.max(1, wrap.clientWidth - 20) / width, Math.max(1, wrap.clientHeight - 20) / height);
 	const scale = fit * networkMapZoom;
 	svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
