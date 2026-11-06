@@ -135,6 +135,11 @@ try {
 	await cmd(`st_rescan,${sid}`);
 	await waitFor(async () => sent > before && (await hd()) === 2, 10000, "direction sent again after re-reading the track");
 	check(true, "after re-reading the track the panel works the direction out again");
+	// the sidings of the station set (the game forgets the directions): sent again
+	const n1 = sent;
+	await cmd(`st_sid,${sid},`);
+	await waitFor(async () => sent > n1 && (await hd()) === 2, 40000, "direction sent again after the station's settings changed");
+	check(true, "after a change of the station's settings the panel works the direction out again");
 	await browser.close();
 } catch (e) { console.log("ERROR", e); failed = true; } finally { game.kill(); }
 console.log(failed ? "TEST FAILED" : "ALL VIA PANEL TESTS PASSED");

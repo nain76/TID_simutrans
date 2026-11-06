@@ -131,6 +131,41 @@ for (const nm of t2.filter(p => p.t === "N")) {
 const tt = t2.filter(p => p.t === "T"), t0 = of("T");
 assert.ok(Math.max(...tt.flatMap(p => [p.y1, p.y2])) - Math.min(...tt.flatMap(p => [p.y1, p.y2])) === Math.max(...t0.flatMap(p => [p.x1, p.x2])) - Math.min(...t0.flatMap(p => [p.x1, p.x2])), "turned a quarter: the width became the height");
 
+// 9. review 2026-11-02: a single track with signals of both ways at the ends of a block; a long straight; a very large
+// network; a dangerous expression
+{
+	const single = new Map();
+	const add = (x, y, r, extra = {}) => single.set(x + "," + y, Object.assign({ p: [x, y, 0], r }, extra));
+	for (let x = 0; x <= 100; x++) add(x, 5, (x > 0 ? 8 : 0) | (x < 100 ? 2 : 0));
+	single.get("12,5").s = { dir: 2, aspect: "red", name: "閉塞" };
+	single.get("86,5").s = { dir: 8, aspect: "red", name: "閉塞" };
+	context.single = { tiles: [...single.values()], convoys: [] };
+	run("var sp = makeLineDraft(single);");
+	const sw = run2("sp.filter(p => p.t === 'W' && p.b.some(t => t[0] === 50)).map(p => p.f)");
+	assert.ok(sw.length === 1 && sw[0] === 0, `single track: the window between signals of both ways shows both ways (f ${JSON.stringify(sw)})`);
+	context.single.convoys = [train(7, [[50, 5, 0], [51, 5, 0]], 8, "西行"), train(8, [[30, 5, 0], [29, 5, 0]], 2, "東行")];
+	const sp = run2("[...lineTrainPlaces(sp, single, label)].map(([i, l]) => l.number)");
+	assert.ok(sp.includes("西行") || sp.includes("東行"), `a train of either way shows in it (${sp.join(", ")})`);
+	// a straight of 600 tiles without a node: cut into lines of at most 200 tiles
+	const long = [];
+	for (let x = 0; x <= 600; x++) long.push({ p: [x, 3, 0], r: (x > 0 ? 8 : 0) | (x < 600 ? 2 : 0) });
+	context.long = { tiles: long, convoys: [] };
+	const ln = run2("makeLineDraft(long).filter(p => p.t === 'T').map(p => p.b.length)");
+	assert.ok(ln.length >= 3 && ln.every(n => n <= 201) && ln.reduce((a, b) => a + b, 0) >= 601, `a long straight cut into ${ln.length} lines of at most 200 tiles`);
+	// 150,000 tiles: no "Maximum call stack size exceeded" (Math.min(...))
+	const big = [];
+	for (let y = 0; y < 150; y++) for (let x = 0; x < 1000; x++) big.push({ p: [x, y * 3, 0], r: (x > 0 ? 8 : 0) | (x < 999 ? 2 : 0) });
+	context.big = { tiles: big, convoys: [] };
+	const t0 = Date.now();
+	assert.ok(run("makeLineDraft(big).length") > 150, "a network of 150,000 tiles is drafted");
+	console.log(`  (150,000 tiles drafted in ${Date.now() - t0} ms)`);
+	// a repeated group in an expression of the colour rules: not used (it could take for ever)
+	run(`var bad = lineRules([{ t: "Y", x1: 0, y1: 0, x2: 0, y2: 0, b: [], f: 0, s: encodeURIComponent(JSON.stringify({ rules: [{ k: "number", v: "(a+)+$", c: "#123456" }] })) }]);`);
+	const t1 = Date.now();
+	assert.equal(run(`lineNumberColor(bad, { number: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", cars: 0 })`), "#ffb31a", "a repeated group (a+)+ is not used");
+	assert.ok(Date.now() - t1 < 100, "and does not take long");
+}
+
 if (process.argv[2]) {
 	// the draft drawn roughly, to look at
 	const S = 10, mx = Math.max(...parts.flatMap(p => [p.x1, p.x2])) + 20, my = Math.max(...parts.flatMap(p => [p.y1, p.y2])) + 6;
@@ -144,4 +179,4 @@ if (process.argv[2]) {
 	}
 	fs.writeFileSync(process.argv[2], out.join("") + "</svg>");
 }
-console.log(`PASS: line panel draft: shortened, stations (boxes / platform marks / names), windows by side and direction, branch, clock; blocks, train numbers in windows / boxes by direction, routes, colour rules, a diagonal as one line, turning (${parts.length} parts)`);
+console.log(`PASS: line panel draft: shortened, stations (boxes / platform marks / names), windows by side and direction, branch, clock; blocks, train numbers in windows / boxes by direction, routes, colour rules, a diagonal as one line, turning, single track, long lines cut, very large network, unsafe expressions (${parts.length} parts)`);

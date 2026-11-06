@@ -1886,6 +1886,15 @@ const char *interlocking_manager_t::execute(const char *param, player_t *player)
 
 	purge_temp_routes();
 
+	// the destinations of a station changed (virtual signals, sidings, its area): the directions of its signals for both
+	// directions are forgotten, the panel works them out again (an old one would let a train of a new direction pass)
+	if(  !error  &&  n >= 2  &&  (strcmp(cmd, "dep_add") == 0  ||  strcmp(cmd, "dep_del") == 0  ||  strcmp(cmd, "st_sid") == 0  ||  strcmp(cmd, "st_view") == 0)  ) {
+		if(  il_station_t *st = find_station((uint16)atoi(f[1]))  ) {
+			st->dir_pos.clear();
+			st->dir_val.clear();
+		}
+	}
+
 	cbuffer_t ev;
 	ev.append("{\"type\":\"result\",\"command\":");
 	if(  strncmp(param, "oud_part,", 9) == 0  ) {

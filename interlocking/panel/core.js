@@ -202,7 +202,10 @@ async function pollEvents() {
 	for (const ev of r.events) handleEvent(ev);
 	lastEvent = r.last;
 }
+let lastNewLine = 0;   // the number of the line panel made last (its event comes just before the result of ln_new)
 function handleEvent(ev) {
+	if (ev.type === "line" && ev.new) lastNewLine = ev.id;
+	if (ev.type === "result" && ev.ok && ev.command.startsWith("ln_new,")) ev.lineId = lastNewLine;
 	if (ev.type === "result") {
 		// in a network game the results of everybody's commands come here: only this browser's own are shown
 		// as an error (the log keeps all)

@@ -33,15 +33,22 @@ function lineParts(ln) {
 // upload: ln_begin, ln_add,<parts> ... (each command below ~3500 characters), ln_end,<count>
 async function uploadLine(id, parts) {
 	const enc = (p) => [p.t, p.x1, p.y1, p.x2, p.y2, p.f || 0, (p.b || []).map(t => t.join(":")).join("+"), p.s || ""].join("/");
-	const send = (cmd) => fetch("/api/cmd", { method: "POST", headers: { "X-IL-Panel": "1", "Content-Type": "text/plain; charset=utf-8" }, body: cmd });
-	await send(`ln_begin,${id}`);
+	// a command the bridge refuses (too long, ...): the reason is told, ln_end is not sent
+	const send = async (cmd) => {
+		const r = await fetch("/api/cmd", { method: "POST", headers: { "X-IL-Panel": "1", "Content-Type": "text/plain; charset=utf-8" }, body: cmd });
+		if (r.ok) return null;
+		try { return (await r.json()).error || "HTTP " + r.status; } catch (e) { return "HTTP " + r.status; }
+	};
+	let error = await send(`ln_begin,${id}`);
 	let chunk = [], len = 0;
 	for (const p of parts) {
+		if (error) break;
 		const e = enc(p);
-		if (len + e.length > 3500 && chunk.length) { await send(`ln_add,${id},${chunk.join(";")}`); chunk = []; len = 0; }
+		if (len + e.length > 3500 && chunk.length) { error = await send(`ln_add,${id},${chunk.join(";")}`); chunk = []; len = 0; }
 		chunk.push(e); len += e.length + 1;
 	}
-	if (chunk.length) await send(`ln_add,${id},${chunk.join(";")}`);
+	if (!error && chunk.length) error = await send(`ln_add,${id},${chunk.join(";")}`);
+	if (error) return { ok: false, error };
 	return commandResult(`ln_end,${id},${parts.length}`);
 }
 
@@ -51,6 +58,13 @@ async function uploadLine(id, parts) {
 // between stations a train number window
 // ---------------------------------------------------------------------------
 const LINE_KEEP = 4;   // columns / rows of plain track kept of a long stretch
+const LINE_MAX_TILES = 200;   // tiles of one line part at most (about 2400 characters in the command that sends it)
+// the least and the greatest of many numbers (Math.min(...a) fails on very many)
+function extent(values) {
+	let lo = Infinity, hi = -Infinity;
+	for (const v of values) { if (v < lo) lo = v; if (v > hi) hi = v; }
+	return [lo, hi];
+}
 function makeLineDraft(data) {
 	const tiles = new Map();   // "x,y" -> { p, r, halt, s } (heights are not drawn: a bridge over a track is one tile)
 	for (const t of data?.tiles || []) {
@@ -92,7 +106,8 @@ function makeLineDraft(data) {
 	// tracks side by side would fall onto one another)
 	const lie = new Map();   // tile -> "h" | "v" | "d" (plain track of a chain going that way)
 	for (const c of chains) for (let i = 1; i < c.length - 1; i++) {
-		if (c[i].halt) continue;
+		// a signal stays (each block keeps some length: room for its window)
+		if (c[i].halt || c[i].s) continue;
 		// the way the track goes here: over a few tiles before and after
 		const a = c[Math.max(0, i - 4)], z = c[Math.min(c.length - 1, i + 4)];
 		const dx = Math.abs(z.p[0] - a.p[0]), dy = Math.abs(z.p[1] - a.p[1]);
@@ -100,7 +115,7 @@ function makeLineDraft(data) {
 		lie.set(c[i], lie.has(c[i]) && lie.get(c[i]) !== o ? "x" : o);
 	}
 	const xs = [...tiles.values()].map(t => t.p[0]), ys = [...tiles.values()].map(t => t.p[1]);
-	const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+	const [x0, x1] = extent(xs), [y0, y1] = extent(ys);
 	function squeeze(lo, hi, cells, ok) {
 		const map = new Map();
 		let c = 0, run = 0;
@@ -139,12 +154,20 @@ function makeLineDraft(data) {
 				}
 				return true;
 			};
-			if (i === pts.length - 1 || !ok(i + 1)) keep.push(i);
+			// (a line ends after LINE_MAX_TILES tiles anyway: the points of one line are not checked again and again)
+			if (i === pts.length - 1 || i - keep[keep.length - 1] >= LINE_MAX_TILES || !ok(i + 1)) keep.push(i);
 		}
 		for (let k = 1; k < keep.length; k++) {
+			// (a stretch shortened to nothing still stands for its tiles: their trains show)
 			const a = pts[keep[k - 1]], b = pts[keep[k]];
-			if (a[0] === b[0] && a[1] === b[1]) continue;
-			parts.push({ t: "T", x1: a[0], y1: a[1], x2: b[0], y2: b[1], b: chain.slice(keep[k - 1], keep[k] + 1).map(t => t.p), s: "", f: 0 });
+			// a long line is cut into pieces of at most LINE_MAX_TILES tiles (one part must fit into one command)
+			const i0 = keep[k - 1], i1 = keep[k], pieces = Math.ceil((i1 - i0) / LINE_MAX_TILES);
+			for (let j = 0; j < pieces; j++) {
+				const s0 = i0 + Math.round((i1 - i0) * j / pieces), s1 = i0 + Math.round((i1 - i0) * (j + 1) / pieces);
+				const at = (i) => [Math.round(a[0] + (b[0] - a[0]) * (i - i0) / (i1 - i0)), Math.round(a[1] + (b[1] - a[1]) * (i - i0) / (i1 - i0))];
+				const [u, v] = [at(s0), at(s1)];
+				parts.push({ t: "T", x1: u[0], y1: u[1], x2: v[0], y2: v[1], b: chain.slice(s0, s1 + 1).map(t => t.p), s: "", f: 0 });
+			}
 		}
 	}
 	// 4. stations: the platform tiles of each stop, its platform tracks (tiles of the stop joined by track)
@@ -218,18 +241,23 @@ function makeLineDraft(data) {
 			take(r);
 			// its direction: of the signal at either end of the block (only one way)
 			const ends = [p.b[run[0] - 1], p.b[run[run.length - 1] + 1]].filter(Boolean).map(q => tiles.get(q[0] + "," + q[1])?.s).filter(s => s && [N, E, S, W].includes(s.dir));
-			parts.push(Object.assign({ t: "W", b: run.map(i => p.b[i]), s: "", f: ends.length ? ends[0].dir : 0, ty: (flat ? "h" : "v") + pos }, r));
+			// signals of both ways at its ends (a single track): the window shows the trains of both ways (0)
+			const one = ends.length && ends.every(e => e.dir === ends[0].dir);
+			parts.push(Object.assign({ t: "W", b: run.map(i => p.b[i]), s: "", f: one ? ends[0].dir : 0, ty: (flat ? "h" : "v") + pos, both: ends.length > 0 && !one }, r));
 		}
 	}
 	// a window of a block without a signal: the direction of the nearest window on the same track
 	const wins = parts.filter(p => p.t === "W");
-	for (const w of wins) if (!w.f) {
-		const near = wins.filter(o => o.f && o.ty === w.ty).sort((a, b) => Math.abs(a.x1 + a.y1 - w.x1 - w.y1) - Math.abs(b.x1 + b.y1 - w.x1 - w.y1))[0];
+	// (not where the track has windows of both ways, or signals of both ways: a single track)
+	for (const w of wins) if (!w.f && !w.both) {
+		const same = wins.filter(o => o.ty === w.ty);
+		if (same.some(o => o.both) || new Set(same.filter(o => o.f).map(o => o.f)).size > 1) continue;
+		const near = same.filter(o => o.f).sort((a, b) => Math.abs(a.x1 + a.y1 - w.x1 - w.y1) - Math.abs(b.x1 + b.y1 - w.x1 - w.y1))[0];
 		if (near) w.f = near.f;
 	}
-	for (const w of wins) delete w.ty;
+	for (const w of wins) { delete w.ty; delete w.both; }
 	// 6. the clock at the top left; everything starts at (2,2)
-	const minX = Math.min(...parts.flatMap(p => [p.x1, p.x2])), minY = Math.min(...parts.flatMap(p => [p.y1, p.y2]));
+	const minX = extent(parts.flatMap(p => [p.x1, p.x2]))[0], minY = extent(parts.flatMap(p => [p.y1, p.y2]))[0];
 	parts.push({ t: "C", x1: minX + 5, y1: minY - 4, x2: minX + 5, y2: minY - 4, b: [], s: "", f: 0 });
 	return normalizeLine(parts);
 }
@@ -237,7 +265,7 @@ function makeLineDraft(data) {
 function normalizeLine(parts) {
 	const placed = parts.filter(p => p.t !== "Y");
 	if (!placed.length) return parts;
-	const ox = 7 - Math.min(...placed.flatMap(p => [p.x1, p.x2])), oy = 4 - Math.min(...placed.flatMap(p => [p.y1, p.y2]));
+	const ox = 7 - extent(placed.flatMap(p => [p.x1, p.x2]))[0], oy = 4 - extent(placed.flatMap(p => [p.y1, p.y2]))[0];
 	for (const p of placed) { p.x1 = Math.round(p.x1 + ox); p.x2 = Math.round(p.x2 + ox); p.y1 = Math.round(p.y1 + oy); p.y2 = Math.round(p.y2 + oy); }
 	return parts;
 }
@@ -267,7 +295,7 @@ function placeLineNames(parts, boxes = null) {
 // the drawing turned a quarter clockwise; windows stay lying, station names stay upright and go above their stations again
 function rotateLine(parts) {
 	const placed = parts.filter(p => p.t !== "Y");
-	const H = Math.max(...placed.flatMap(p => [p.y1, p.y2]));
+	const H = extent(placed.flatMap(p => [p.y1, p.y2]))[1];
 	for (const p of placed) {
 		if (p.t === "W") {
 			const cxm = (p.x1 + p.x2) / 2, cym = (p.y1 + p.y2) / 2, w = Math.abs(p.x2 - p.x1), h = Math.abs(p.y2 - p.y1);
@@ -328,16 +356,35 @@ function lineTrainLabel(c, data) {
 // [{ k: "cars" | "type" | "number" | "op", v: value (cars: a number; the others: a regular expression), c: colour }].
 // The first rule that fits wins; a train marked by hand (special train number) is red
 const LINE_NUMBER_COLOR = "#ffb31a", LINE_SPECIAL_COLOR = "#ff4040";
+let lineRulesMemo = { s: null, rules: [] };   // read once per text of the style part (the expressions are compiled once)
 function lineRules(parts) {
-	const y = (parts || []).find(p => p.t === "Y");
-	try { const r = JSON.parse(decodeURIComponent(y?.s || "")); return Array.isArray(r?.rules) ? r.rules : []; } catch (e) { return []; }
+	const y = (parts || []).find(p => p.t === "Y"), text = y?.s || "";
+	if (lineRulesMemo.s === text) return lineRulesMemo.rules;
+	let rules = [];
+	try { const r = JSON.parse(decodeURIComponent(text)); rules = Array.isArray(r?.rules) ? r.rules : []; } catch (e) {}
+	lineRulesMemo = { s: text, rules };
+	return rules;
+}
+// an expression that may take for ever on some texts: a repeated group, as in (a+)+ (not needed for train numbers)
+const lineRuleUnsafe = (v) => typeof v !== "string" || v.length > LINE_RULE_MAX || /\)\s*[*+?{]/.test(v);
+// the expressions are written by anybody and run for every train: short ones only, tried on short texts, compiled once
+const LINE_RULE_MAX = 64;
+const lineRuleRegs = new WeakMap();
+function lineRuleReg(r) {
+	if (!lineRuleRegs.has(r)) {
+		let re = null;
+		try { if (!lineRuleUnsafe(r.v)) re = new RegExp(r.v); } catch (e) {}
+		lineRuleRegs.set(r, re);
+	}
+	return lineRuleRegs.get(r);
 }
 function lineNumberColor(rules, t) {
 	if (t.red) return LINE_SPECIAL_COLOR;
 	const fits = (r) => {
 		if (r.k === "cars") return Number(r.v) === t.cars;
-		const text = r.k === "type" ? t.type : r.k === "op" ? t.op : t.number;
-		try { return new RegExp(r.v).test(text || ""); } catch (e) { return false; }
+		const text = String((r.k === "type" ? t.type : r.k === "op" ? t.op : t.number) || "").slice(0, 32);
+		const re = lineRuleReg(r);
+		return !!re && re.test(text);
 	};
 	return (rules.find(r => r && r.c && fits(r)) || {}).c || LINE_NUMBER_COLOR;
 }
@@ -653,7 +700,7 @@ function lineAutoBind(parts, a, b) {
 	if (!prev.has(k2(tb))) return [ta, tb];
 	const path = [];
 	for (let p = tb; p; p = prev.get(k2(p))) path.unshift(p);
-	return path.length <= 500 ? path : [ta, tb];
+	return path.length <= LINE_MAX_TILES ? path : [ta, tb];
 }
 function bindLineEditor(svg, G) {
 	const toGrid = (e) => {
@@ -784,6 +831,12 @@ function lnDeleteSelected() {
 	lnEdit.sel = -1; lnEdit.multi = null;
 	if (gone.length) lnEdit.dirty = true;
 }
+// the game keeps names up to 256 bytes as sent (encoded): about 28 Japanese characters
+function lineNameFits(name) {
+	if (encodeURIComponent(name).length <= 256) return true;
+	toast(`名前が長すぎます（日本語ならおよそ 28 字まで。今は ${name.length} 字）`, true);
+	return false;
+}
 // a new line panel from a draft of the tracks given
 async function createLine(name, data) {
 	const parts = makeLineDraft(data);
@@ -791,7 +844,8 @@ async function createLine(name, data) {
 	const r = await commandResult(`ln_new,${encodeURIComponent(name)}`);
 	if (!r.ok) { toast("路線盤を作れませんでした: " + tr(r.error), true); renderNetwork(); return; }
 	await refreshStatus();
-	const made = linesOf().filter(x => x.name === encodeURIComponent(name)).sort((a, b) => b.id - a.id)[0];
+	// the one this command made (another one of the same name may have been made at the same time)
+	const made = linesOf().find(x => x.id === r.lineId);
 	if (!made) return;
 	startLineEdit(made, parts);
 	lnEdit.dirty = true;
@@ -867,7 +921,7 @@ document.getElementById("lineBar").addEventListener("click", async (e) => {
 	else if (c === "new") {
 		if (!network?.tiles?.length) { toast("線路の情報を取得中です。しばらくしてからもう一度押してください", true); return; }
 		const name = prompt("路線盤の名前（例：京王線）", "");
-		if (!name) return;
+		if (!name || !lineNameFits(name)) return;
 		// the range: dragged on the map, or all the connected tracks
 		lnPick = { name };
 		lineView = "map";
@@ -879,7 +933,7 @@ document.getElementById("lineBar").addEventListener("click", async (e) => {
 	else if (c === "edit" && ln) { const parts = lineParts(ln); if (parts) startLineEdit(ln, parts); }
 	else if (c === "rename" && ln) {
 		const name = prompt("路線盤の名前", lineName(ln));
-		if (!name || name === lineName(ln)) return;
+		if (!name || name === lineName(ln) || !lineNameFits(name)) return;
 		const r = await commandResult(`ln_name,${ln.id},${encodeURIComponent(name)}`);
 		if (!r.ok) toast("名前を変えられませんでした: " + tr(r.error), true);
 		await refreshStatus(); renderNetwork();
@@ -980,6 +1034,8 @@ function editLineColors() {
 		m.querySelectorAll("[data-x=del]").forEach(b => b.onclick = () => { read(); rules.splice(Number(b.dataset.i), 1); draw(); });
 		m.querySelector("[data-x=ok]").onclick = () => {
 			read();
+			const bad = rules.find(r => r.v !== "" && r.k !== "cars" && (lineRuleUnsafe(r.v) || (() => { try { new RegExp(r.v); return false; } catch (e) { return true; } })()));
+			if (bad) { toast(`「${bad.v}」は使えません（${LINE_RULE_MAX} 字まで、かっこの後ろの繰り返し（+ * ? {}）は不可、書き方の誤り）`, true); return; }
 			let y = lnEdit.parts.find(p => p.t === "Y");
 			if (!y) { y = { t: "Y", x1: 0, y1: 0, x2: 0, y2: 0, b: [], s: "", f: 0 }; lnEdit.parts.push(y); }
 			const s = encodeURIComponent(JSON.stringify({ rules: rules.filter(r => r.v !== "").map(r => ({ k: r.k, v: r.v, c: r.c })) }));

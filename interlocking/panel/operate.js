@@ -151,6 +151,7 @@ function routePathCommand(kind, st, path, name) {
 function pointLevers() {
 	const st = station();
 	const o = {};
+	if (destinationsIgnoreLevers) return o;
 	for (const lv of (st && st.levers) || []) o[key(lv.pos)] = lv.value;
 	// a point lever just thrown (shown before the game's answer)
 	for (const k of [...shownAhead.keys()]) if (k.startsWith("pt:")) {
@@ -223,17 +224,25 @@ function setLever(li, pos) {
 // directions the panel leads trains away from the signal (where destinations lie), so that a train going the
 // other way passes, and one going a handled way waits for its route even before any route was ever set.
 // Once per signal and track layout, by a browser that may operate the station (the game keeps it).
-const signalDirsChecked = new Map();   // "station|pos" -> tracksSig when worked out
+const signalDirsChecked = new Map();   // "station|pos" -> { sig: the track and the station's settings when worked out, at: when sent }
+let destinationsIgnoreLevers = false;  // while working them out: the points as they could lie, not as they are fixed now
 function syncSignalDirections(st, mayOperate) {
 	if (!st || !mayOperate || !tracks.tiles.length || !stationTiles || layout.station !== st.id) return;
+	// worked out again when the track or the destinations of the station change (virtual signals, sidings, its area:
+	// the game forgets the directions then), or a few seconds after sending one that did not arrive
+	const sig = tracksSig + "|" + JSON.stringify([(st.departures || []).map(d => d.pos), st.siding_halts || [], st.view || null]);
+	const now = performance.now();
 	for (const s of st.signals) {
-		if (s.hd) continue;
 		const t = tileIndex.get(key(s.pos)), tag = st.id + "|" + key(s.pos);
-		if (!t || !t.s || !((t.s.dir & 5) === 5 || (t.s.dir & 10) === 10) || signalDirsChecked.get(tag) === tracksSig) continue;
-		signalDirsChecked.set(tag, tracksSig);
+		if (!t || !t.s || !((t.s.dir & 5) === 5 || (t.s.dir & 10) === 10)) continue;
+		const done = signalDirsChecked.get(tag);
+		if (done && done.sig === sig && (s.hd || now - done.at < 30000)) continue;
 		let mask = 0;
-		for (const d of findDestinations({ pos: s.pos }, []).values()) mask |= DIRS.find(x => neighbour(t, x) === d.path[1]) || 0;
-		if (mask) command(`sig_dir,${st.id},${s.pos.join(",")},${mask}`, `両方向信号の向き（${signalLabel(st, s.pos)}）`);
+		destinationsIgnoreLevers = true;
+		try { for (const d of findDestinations({ pos: s.pos }, []).values()) mask |= DIRS.find(x => neighbour(t, x) === d.path[1]) || 0; }
+		finally { destinationsIgnoreLevers = false; }
+		signalDirsChecked.set(tag, { sig, at: now });
+		if (mask && mask !== s.hd) command(`sig_dir,${st.id},${s.pos.join(",")},${mask}`, `両方向信号の向き（${signalLabel(st, s.pos)}）`);
 	}
 }
 

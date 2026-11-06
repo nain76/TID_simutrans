@@ -114,6 +114,11 @@ def run(args):
         wait_until(lambda: cnv()["pos"][0] <= 2, 90, "train west of S1")
         check(True, "the westbound train passes once west is not handled")
         check(not p.cmd(f"sig_dir,{sid},3,5,0,16")["ok"] and not p.cmd(f"sig_dir,{sid},9,9,0,2")["ok"], "bad direction / unregistered signal rejected")
+        # the destinations of the station change (here: its sidings set again): the directions are forgotten, the panel works
+        # them out again (an old one could let a train of a new direction pass without a route)
+        hd0 = lambda: next(s for s in p.status()["stations"][0]["signals"] if s["pos"] == [3, 5, 0]).get("hd")
+        check(p.cmd(f"sig_dir,{sid},3,5,0,10")["ok"] and hd0() == 10 and p.cmd(f"st_sid,{sid},")["ok"] and hd0() is None,
+              "the sidings of the station set: the directions forgotten")
         hd = lambda: next(s for s in p.status()["stations"][0]["signals"] if s["pos"] == [3, 5, 0]).get("hd")
         check(p.cmd(f"st_rescan,{sid}")["ok"] and hd() is None, "re-reading the track forgets the directions (the panel works them out again)")
     finally:
